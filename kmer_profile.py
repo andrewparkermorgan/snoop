@@ -2,7 +2,7 @@
 
 ## --- kmer_profile.py --- ##
 ##      Date: 13 August 2014
-##      Udpated: NA
+##      Udpated: 29 September 2014
 ##      Purpose: given a list of msBWTs, generate a (possibly-downsampled) k-mer kmer_profile
 
 import os
@@ -29,9 +29,9 @@ def kmerIterator(bwtList, k, threshold):
 	kmerEnds = np.zeros(dtype = "<u8", shape = (k+1, len(bwtList)))
 	for x in range(0, len(bwtList)):
 		kmerEnds[0, x] = bwtList[x].getTotalSize()
-	
+
 	status = np.zeros(dtype = "<u1", shape = (k+1, ))
-	
+
 	while currentK > 0 or status[0] < vcLen:
 		if currentK == k:
 			for x in range(0, len(bwtList)):
@@ -51,13 +51,13 @@ def kmerIterator(bwtList, k, threshold):
 				fmEnd = bwtList[x].getFullFMAtIndex(kmerEnds[currentK, x])
 				kmerStarts[currentK+1, x] = fmStart[status[currentK]]
 				kmerEnds[currentK+1, x] = fmEnd[status[currentK]]
-				
+
 				if fmEnd[status[currentK]] - fmStart[status[currentK]] > threshold:
 					foundVals = True
-			
+
 			# update status[currentK]
 			status[currentK] += 1
-			
+
 			if foundVals:
 				# increment currentK if we found something
 				currentK += 1
@@ -88,14 +88,20 @@ def profile_kmers(msbwt_paths, k, threshold = 1, sampling_rate = 1.0, n = 1, N =
 
 		## extract string-formatted counts from numpy array
 		str_counts = [ str(counts[i]) for i in range(0, len(msbwt)) ]
-		is_unique = any(counts < threshold)
+		is_unique = any(counts <= threshold)
 
 		if not args.unique:
 
+			## downsampling by randomly including or excluding this k-mer for each sapmle... why??
 			flag = np.ones(n)
-			if not (sampling_rate == 1.0):
-				flag = np.array(np.random.ranf(n) < sampling_rate, dtype = int)
-			
+			# if not (sampling_rate == 1.0):
+				# flag = np.array(np.random.ranf(n) < sampling_rate, dtype = int)
+
+			## perform downsampling
+			if np.random.ranf() > sampling_rate:
+				# print "skipping kmer '{}'".format(kmer)
+				continue
+
 			## compute element-wise Jensen-Shannon divergence (JSD)
 			probs = [ (float(max(counts[i], threshold))/sizes[i]) for i in range(0, len(msbwt)) ]
 			mean_prob = np.average(probs, weights = weights)
@@ -105,15 +111,20 @@ def profile_kmers(msbwt_paths, k, threshold = 1, sampling_rate = 1.0, n = 1, N =
 
 			## write to output stream, if provided
 			if out_stream is not None:
-				out_stream.write( delim.join([ kmer, str_counts, str(jsd) ]) + "\n" )
+				out_fields = [ kmer ]
+				out_fields.extend(str_counts)
+				out_fields.append(str(jsd))
+				out_stream.write( delim.join(out_fields) + "\n" )
 
 		else:
 			if is_unique:
 				## also check for uniqueness of reverse-complement, since that's probably more biologically-meaningful
 				rev_counts = np.array([ msbwt[i].countOccurrencesOfSeq(str(dna.revcomp(kmer))) for i in range(0, len(msbwt)) ])
 				total_counts = counts + rev_counts
-				if any(total_counts < threshold):
-					out_stream.write( delim.join( [kmer].extend([ str(int(x)) for x in total_counts ]) ) )
+				if any(total_counts <= threshold):
+					out_fields = [ kmer ]
+					out_fields.extend( [ str(int(x)) for x in total_counts ] )
+					out_stream.write( delim.join(out_fields) + "\n" )
 
 	if args.unique:
 		return 0
@@ -137,16 +148,19 @@ parser.add_argument(	"-f","--sampling_rate", type = float,
 			help = "fraction by which to downsample k-mer counts [EXPERIMETNAL] [default: %(default)f]" )
 parser.add_argument(	"-n","--niter", type = int,
 			default = 100,
-			help = "number of replicates to use for computign standard errors of divergence metric [EXPERIMETNAL] [default: %(default)f]" )
+			help = "number of replicates to use for computing standard errors of divergence metric [EXPERIMETNAL] [default: %(default)f]" )
 parser.add_argument(	"-N","--maxk", type = float,
 			default = float("Inf"),
 			help = "max number of k-mers to count; useful only for testing [default: %(default)f]" )
 parser.add_argument(	"-s","--seed", type = int,
 			default = None,
 			help = "seed for RNG which controls downsampling; set it manually for reproducible results [default: %(default)s]" )
+parser.add_argument(	"-o", "--output", type = writeable_or_stdout_handle,
+			default = None,
+			help = "file to which to write the (possibly-downsampled, abundance-thresholded) k-mer profile (use '-' for stdout) [default: %(default)s]" )
 parser.add_argument(	"-v","--verbose", action = "store_true",
 			default = False,
-			help = "print a status trace to stderr" )
+			help = "print status trace to stderr" )
 args = parser.parse_args()
 
 
@@ -157,6 +171,6 @@ print args.msbwt
 if args.seed is not None:
 	np.random.seed(args.seed)
 
-jsd = profile_kmers(args.msbwt, args.kmer, args.minhits, args.sampling_rate, args.niter, args.maxk, args.unique, None)
+jsd = profile_kmers(args.msbwt, args.kmer, args.minhits, args.sampling_rate, args.niter, args.maxk, args.unique, args.output)
 print "Total Jensen-Shannon divergence:", np.mean(jsd), np.std(jsd)
 # np.savetxt(sys.stderr, jsd)

@@ -36,6 +36,12 @@ parser.add_argument(	"-s","--step", type = int,
 parser.add_argument(	"-M","--msbwt",
 			default = "./",
 			help = "globbing expression to find directories containing msBWT components" )
+parser.add_argument(	"-n","--normalize", type = readable_dir,
+			default = None,
+			help = "msBWT against which to normalize abundances of each queried k-mer" )
+parser.add_argument(	"-R","--revcomp", action = "store_true",
+			default = None,
+			help = "normalize against both k-mer and its reverse complement (if reference msBWT is not from an assembled genome)" )
 parser.add_argument(	"-S","--summarize", action = "store_true",
 			default = False,
 			help = "aggregate counts over the intervals in 'regions' file, instead of reporting k-mer-level counts" )
@@ -55,7 +61,7 @@ args = parser.parse_args()
 msbwt = []
 bwt_dirs = glob.glob(args.msbwt)
 for ff in bwt_dirs:
-	
+
 	if not readable_dir(ff):
 		continue
 	try:
@@ -71,6 +77,18 @@ else:
 	sys.stderr.write("Using the following BWTs:\n{}\n".format(str(bwt_dirs)))
 	if args.summarize:
 		sys.stderr.write("Working in summary mode.\n")
+
+## try to connect to reference msBWT for normalizing
+ref_bwt = None
+if args.normalize is not None:
+	try:
+		ref_bwt = loadBWT(args.normalize)
+	except Exception as e:
+		print "Couldn't load reference BWT at <{}>".format(args.normalize)
+		print e
+
+if ref_bwt is not None:
+	sys.stderr.write("Using the following BWT as reference:\n{}\n".format(args.normalize))
 
 ## get sequences of k-mers via pyfasta
 fasta = pyfasta.Fasta(args.genome, key_fn = lambda key: key.split()[0])
@@ -115,7 +133,7 @@ for r in regions:
 	zeros = 0
 
 	for kmer in kmers:
-		
+
 		## skip kmers which are clipped by region boundaries; this produces boundary artefact but I will ignore it
 		if (kmer.end - kmer.start) != args.kmer:
 			continue
@@ -125,31 +143,44 @@ for r in regions:
 		# initialize counters for this kmer
 		count_f = 0
 		count_r = 0
+		count_sum = 0
+		count_ref = -1
 		for i in range(0, len(msbwt)):
 			count_f += msbwt[i].countOccurrencesOfSeq( str(seq) )
 			count_r += msbwt[i].countOccurrencesOfSeq( str(dna.revcomp(seq)) )
-			
-		agg.append( count_f + count_r )
+		count_sum = count_f + count_r
+
+		## count occurrences in reference msBWT
+		if args.normalize is not None:
+			count_ref = ref_bwt.countOccurrencesOfSeq( str(seq) )
+			if args.revcomp:
+				count_ref += ref_bwt.countOccurrencesOfSeq( str(dna.revcomp(seq)) )
+
+
+		if args.normalize is not None:
+			agg.append(count_sum/count_ref)
+		else:
+			agg.append(count_sum)
 
 		## record this kmer as zero iff it returned zero across all BWTs
-		if (count_f + count_r) == 0:
+		if (count_sum) == 0:
 			zeros += 1
 
 		## fine-grained mode: print results for each k-mer
 		if not args.summarize:
-			print kmer.chrom, kmer.start, kmer.end, seq, count_f, count_r, (count_f + count_r)
+			print kmer.chrom, kmer.start, kmer.end, seq, count_f, count_r, count_sum, count_ref, float(count_sum)/count_ref
 
 		# except Exception as e:
 		# 	# print "Sequence was: {}; searched failed.".format(seq)
 		# 	print type(e)
 		# 	pass
 
-	## coarse-grained mode: print only the summary over the region 
+	## coarse-grained mode: print only the summary over the region
 	if args.summarize:
 
 		med, q, qqq, mu = ("NA", "NA", "NA", "NA")
 		agg_trimmed = filter(lambda x: (x > args.minhits) and (x <= args.maxhits), agg)
-		
+
 		if len(agg_trimmed):
 			med = numpy.median(agg_trimmed)
 			q = numpy.percentile(agg_trimmed, 25.0)

@@ -26,10 +26,10 @@ parser.add_argument(	"-M", "--msbwt", type = str,
 			help= "globbing expression to find directories containing msBWT components" )
 parser.add_argument(	"-s", "--spacer", type = str,
 			default = "-",
-			help = "spacer character for printed alignments [default:'%(default)']" )
+			help = "spacer character for printed alignments [default:%(default)s]" )
 parser.add_argument(	"-f", "--maf", type = float,
 			default = 0.1,
-			help = "minimum 'minor allele frequency' to accept site as variant [default:%(default)]" )
+			help = "minimum 'minor allele frequency' to accept site as variant [default:%(default)f]" )
 parser.add_argument(	"queries", metavar = "K", type = str, nargs = "+",
 			help = "queries; whitespace-separated if more than one" )
 args = parser.parse_args()
@@ -48,7 +48,7 @@ def align_hits(query, bwt, spacer = "-"):
 			reads.append( r[(d+1):] + r[0:d] )
 			dollars.append(d)
 			k = max(k, len(r))
-	
+
 		stack = [ y for (x,y) in sorted(zip(dollars, range(0, e-s))) ]
 		aln = [ [spacer]*(k + max(dollars)-min(dollars)) for i in range(0, e-s) ]
 		for ii in range(0, len(stack)):
@@ -62,7 +62,7 @@ def align_hits(query, bwt, spacer = "-"):
 
 
 def call_variant_sites(aln, maf, ignore = ["-","N"]):
-	
+
 	nseq = len(aln)
 	if nseq:
 		width = len(aln[0])
@@ -107,4 +107,3 @@ for q in args.queries:
 		else:
 			print "no hits found for query: " + q
 		print ""
-
