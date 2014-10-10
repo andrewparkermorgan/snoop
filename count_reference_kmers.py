@@ -3,7 +3,7 @@
 
 ## --- count_reference_kmers.py --- ##
 ##	Date: 17 June 2014
-##	Udpated: 8 July 2014 (allow parallel search of multiple BWTs via globbing on -M option)
+##	Udpated: 6 Oct 2014 (allow normalization against a 'reference' BWT)
 ##	Purpose: given a list of genomic intervals (in bed format) and a reference sequence, generate k-mers and count occurrences of each in a msBWT
 
 import os
@@ -145,6 +145,7 @@ for r in regions:
 		count_r = 0
 		count_sum = 0
 		count_ref = -1
+		norm_count = 0
 		for i in range(0, len(msbwt)):
 			count_f += msbwt[i].countOccurrencesOfSeq( str(seq) )
 			count_r += msbwt[i].countOccurrencesOfSeq( str(dna.revcomp(seq)) )
@@ -156,9 +157,14 @@ for r in regions:
 			if args.revcomp:
 				count_ref += ref_bwt.countOccurrencesOfSeq( str(dna.revcomp(seq)) )
 
-
+		## update aggregate counts; relevant for summary mode only
 		if args.normalize is not None:
-			agg.append(count_sum/count_ref)
+			if count_ref > 0:
+				norm_count = float(count_sum)/count_ref
+				agg.append(norm_count)
+			else:
+				# don't add this k-mer to aggregate count for this interval if it returned zero in reference BWT
+				norm_count = "NA"
 		else:
 			agg.append(count_sum)
 
@@ -168,7 +174,7 @@ for r in regions:
 
 		## fine-grained mode: print results for each k-mer
 		if not args.summarize:
-			print kmer.chrom, kmer.start, kmer.end, seq, count_f, count_r, count_sum, count_ref, float(count_sum)/count_ref
+			print kmer.chrom, kmer.start, kmer.end, seq, count_f, count_r, count_sum, count_ref, norm_count
 
 		# except Exception as e:
 		# 	# print "Sequence was: {}; searched failed.".format(seq)
