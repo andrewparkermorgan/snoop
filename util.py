@@ -84,10 +84,11 @@ class ReadSet:
 	def pop(self):
 		return Read(self.seq.pop(), self.offset.pop())
 
-	def pseudoalign(self, spacer = self._spacer):
-		self._spacer = spacer
+	def pseudoalign(self, spacer = None):
+		if spacer is not None and len(spacer):
+			self._spacer = str(spacer)[0]
 		if self.alignment is None:
-			self.alignment = _pseudoalign(self.seq, self.offset, spacer)
+			self.alignment = _pseudoalign(self.seq, self.offset, self._spacer)
 		return self.alignment
 
 	def consistency_score(self, maf = 0.0, eps = 0.00001):
