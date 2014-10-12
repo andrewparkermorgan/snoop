@@ -10,130 +10,16 @@ import sys
 import argparse
 import numpy as np
 
-import dna
+import MUSCython.MultiStringBWTCython as ms
+
 from common import *
-
-from MUSCython.MultiStringBWTCython import * # msBWT
-
-## Matt's generator for the union of k-mers present in a list of msBWT objects
-def kmerIterator(bwtList, k, threshold):
-	'''
-	@param bwtList - the list of BWTs (the actual objects) to search
-	@param k - the length of the k-mers
-	@param threshold - a k-mer must have more than the threshold to be returned
-	@return - a generator for the k-mers
-	'''
-	vcLen = 6
-	currentK = 0
-	kmerStarts = np.zeros(dtype = "<u8", shape = (k+1, len(bwtList)))
-	kmerEnds = np.zeros(dtype = "<u8", shape = (k+1, len(bwtList)))
-	for x in range(0, len(bwtList)):
-		kmerEnds[0, x] = bwtList[x].getTotalSize()
-
-	status = np.zeros(dtype = "<u1", shape = (k+1, ))
-
-	while currentK > 0 or status[0] < vcLen:
-		if currentK == k:
-			for x in range(0, len(bwtList)):
-				if kmerStarts[currentK, x] != kmerEnds[currentK, x]:
-					seq = bwtList[x].recoverString(kmerStarts[currentK, x])[0:k]
-			yield (seq, kmerEnds[currentK]-kmerStarts[currentK])
-			currentK -= 1
-		elif status[currentK] == 0 or status[currentK] == 4:
-			status[currentK] += 1
-		elif status[currentK] == 6:
-			currentK -= 1
-		else:
-			# we need to write the correct value into the kmerStarts and kmerEnds at currentK+1
-			foundVals = False
-			for x in range(0, len(bwtList)):
-				fmStart = bwtList[x].getFullFMAtIndex(kmerStarts[currentK, x])
-				fmEnd = bwtList[x].getFullFMAtIndex(kmerEnds[currentK, x])
-				kmerStarts[currentK+1, x] = fmStart[status[currentK]]
-				kmerEnds[currentK+1, x] = fmEnd[status[currentK]]
-
-				if fmEnd[status[currentK]] - fmStart[status[currentK]] > threshold:
-					foundVals = True
-
-			# update status[currentK]
-			status[currentK] += 1
-
-			if foundVals:
-				# increment currentK if we found something
-				currentK += 1
-				status[currentK] = 0
-
-def profile_kmers(msbwt_paths, k, threshold = 1, sampling_rate = 1.0, n = 1, N = float("inf"), unique_only = False, out_stream = None, delim = "\t"):
-
-	## initialize list of msBWTs and their sizes
-	msbwt = []
-	sizes = np.zeros(len(msbwt_paths), dtype = "u8")
-	weights = np.zeros(len(msbwt_paths), dtype = "f8")
-
-	for i in range(0, len(msbwt_paths)):
-		msbwt.append( loadBWT(msbwt_paths[i]) )
-		sizes[i] = msbwt[i].getTotalSize()
-	weights = sizes/float(sum(sizes))
-
-	total_jsd = np.zeros(n)
-	j = 0
-
-	## iterate using the k-mer generator
-	for (kmer, counts) in kmerIterator(msbwt, k, threshold):
-
-		## increment counter and exit early, if requested
-		j += 1
-		if j > N:
-			break
-
-		## extract string-formatted counts from numpy array
-		str_counts = [ str(counts[i]) for i in range(0, len(msbwt)) ]
-		is_unique = any(counts <= threshold)
-
-		if not args.unique:
-
-			## downsampling by randomly including or excluding this k-mer for each sapmle... why??
-			flag = np.ones(n)
-			# if not (sampling_rate == 1.0):
-				# flag = np.array(np.random.ranf(n) < sampling_rate, dtype = int)
-
-			## perform downsampling
-			if np.random.ranf() > sampling_rate:
-				# print "skipping kmer '{}'".format(kmer)
-				continue
-
-			## compute element-wise Jensen-Shannon divergence (JSD)
-			probs = [ (float(max(counts[i], threshold))/sizes[i]) for i in range(0, len(msbwt)) ]
-			mean_prob = np.average(probs, weights = weights)
-			logged = [ np.log(probs[i]/mean_prob)*probs[i] for i in range(0, len(msbwt)) ]
-			jsd = np.average(logged, weights = weights)
-			total_jsd += jsd * flag
-
-			## write to output stream, if provided
-			if out_stream is not None:
-				out_fields = [ kmer ]
-				out_fields.extend(str_counts)
-				out_fields.append(str(jsd))
-				out_stream.write( delim.join(out_fields) + "\n" )
-
-		else:
-			if is_unique:
-				## also check for uniqueness of reverse-complement, since that's probably more biologically-meaningful
-				rev_counts = np.array([ msbwt[i].countOccurrencesOfSeq(str(dna.revcomp(kmer))) for i in range(0, len(msbwt)) ])
-				total_counts = counts + rev_counts
-				if any(total_counts <= threshold):
-					out_fields = [ kmer ]
-					out_fields.extend( [ str(int(x)) for x in total_counts ] )
-					out_stream.write( delim.join(out_fields) + "\n" )
-
-	if args.unique:
-		return 0
-	else:
-		return total_jsd
+import snoop.util
+import snoop.kmers
+import dna
 
 ## parse command-line arguments
 parser = argparse.ArgumentParser(description = "Utility for generating a k-mer profile from a set of msBWTs.")
-parser.add_argument(	"-M","--msbwt", nargs = "*", type = readable_dir,
+parser.add_argument(	"-M","--msbwt", nargs = "+", type = readable_dir,
 			help = "one or more msBWT paths" )
 parser.add_argument(	"-k","--kmer", type = int,
 			default = 30,
@@ -167,10 +53,22 @@ args = parser.parse_args()
 print "Using the following msBWTs:"
 print args.msbwt
 
+msbwt = util.load_bwts(args.msbwt)
+
 ## manually set seed for RNG if required
 if args.seed is not None:
 	np.random.seed(args.seed)
 
-jsd = profile_kmers(args.msbwt, args.kmer, args.minhits, args.sampling_rate, args.niter, args.maxk, args.unique, args.output)
-print "Total Jensen-Shannon divergence:", np.mean(jsd), np.std(jsd)
+profiler = kmers.KmerProfiler(msbwt, args.kmer, args.minhits, args.sampling_rate, args.maxk)
+
+total_jsd = 0
+for (kmer, counts, jsd, cum_jsd) in profiler.profile():
+	outfields = [kmer]
+	outfields.extend(counts)
+	outfields.append(jsd)
+	total_jsd = cum_jsd
+
+	args.output.write( "\t".join(outfields) + "\n" )
+
+print "Total Jensen-Shannon divergence:", total_jsd
 # np.savetxt(sys.stderr, jsd)

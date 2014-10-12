@@ -14,8 +14,8 @@ import tempfile
 import glob
 import numpy
 
+import snoop.util
 import dna
-from common import *
 
 import pybedtools
 import pyfasta
@@ -58,20 +58,11 @@ args = parser.parse_args()
 
 
 ## connect to msBWT(s)
-msbwt = []
 bwt_dirs = glob.glob(args.msbwt)
-for ff in bwt_dirs:
-
-	if not readable_dir(ff):
-		continue
-	try:
-		msbwt.append( loadBWT(ff) )
-	except Exception as e:
-		print "Couldn't load BWT at <{}>".format(ff)
-		print e
+msbwt = util.load_bwts(bwt_dirs)
 
 ## fail if couldn't connect to at least one msBWT
-if len(msbwt) == 0:
+if msbwt is None:
 	sys.exit("No valid BWTs were provided; quitting.")
 else:
 	sys.stderr.write("Using the following BWTs:\n{}\n".format(str(bwt_dirs)))
