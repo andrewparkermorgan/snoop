@@ -42,13 +42,14 @@ for q in args.queries:
 	for i in range(0, len(bwt_dirs)):
 		print "Searching in: " + bwt_dirs[i]
 		q = q.upper()
-		(hits, dollars) = util.get_reads(msbwt[i], q)
-		aln = util.pseudoalign(hits, dollars, args.spacer[0])
-		if aln is not None:
-			for j in range(0, len(aln)):
-				print "".join(aln[j][:])
-			varcodes = util.call_variant_sites(aln, args.maf, [ args.spacer[0], "N" ])
+		reads = util.get_reads(msbwt[i], q)
+		reads.pseudoalign(args.spacer[0])
+		if reads.alignment is not None:
+			for j in range(0, len(reads.alignment)):
+				print "".join(reads.alignment[j][:])
+			varcodes = reads.call_variant_sites(reads.alignment, args.maf)
 			print varcodes
+			print reads.consistency_score(args.maf)
 		else:
 			print "no hits found for query: " + q
 		print ""
