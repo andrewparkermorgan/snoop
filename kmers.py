@@ -25,7 +25,7 @@ class KmerIterator:
 		kmerStarts = np.zeros(dtype = "<u8", shape = (self.k+1, nbwts))
 		kmerEnds = np.zeros(dtype = "<u8", shape = (self.k+1, nbwts))
 		for x in range(0, nbwts):
-			kmerEnds[0, x] = bwtList[x].getTotalSize()
+			kmerEnds[0, x] = self._bwts[x].getTotalSize()
 
 		status = np.zeros(dtype = "<u1", shape = (self.k+1, ))
 
@@ -33,7 +33,7 @@ class KmerIterator:
 			if currentK == self.k:
 				for x in range(0, nbwts):
 					if kmerStarts[currentK, x] != kmerEnds[currentK, x]:
-						seq = bwtList[x].recoverString(kmerStarts[currentK, x])[0:self.k]
+						seq = self._bwts[x].recoverString(kmerStarts[currentK, x])[0:self.k]
 				yield (seq, kmerEnds[currentK]-kmerStarts[currentK])
 				currentK -= 1
 			elif status[currentK] == 0 or status[currentK] == 4:
@@ -44,8 +44,8 @@ class KmerIterator:
 				# we need to write the correct value into the kmerStarts and kmerEnds at currentK+1
 				foundVals = False
 				for x in range(0, nbwts):
-					fmStart = bwtList[x].getFullFMAtIndex(kmerStarts[currentK, x])
-					fmEnd = bwtList[x].getFullFMAtIndex(kmerEnds[currentK, x])
+					fmStart = self._bwts[x].getFullFMAtIndex(kmerStarts[currentK, x])
+					fmEnd = self._bwts[x].getFullFMAtIndex(kmerEnds[currentK, x])
 					kmerStarts[currentK+1, x] = fmStart[status[currentK]]
 					kmerEnds[currentK+1, x] = fmEnd[status[currentK]]
 
