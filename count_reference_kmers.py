@@ -14,7 +14,8 @@ import tempfile
 import glob
 import numpy
 
-import snoop.util
+from common import *
+from snoop import util
 import dna
 
 import pybedtools
@@ -27,12 +28,12 @@ parser.add_argument(	"-r","--regions", type = argparse.FileType("rU"),
 			help = "list of regions (in bed format) for which to make k-mers" )
 parser.add_argument(	"-g","--genome", type = readable_file,
 			default = "$GENOMES/mm10/mm10.fa",
-			help = "reference genome fasta file from which to obtain k-mer sequences" )
+			help = "reference genome fasta file from which to obtain k-mer sequences [default: %(default)s]" )
 parser.add_argument(	"-k","--kmer", type = int,
 			default = 30,
-			help = "k-mer size in bp (ie. length of probe)" )
+			help = "k-mer size in bp (ie. length of probe) [default: %(default)s]" )
 parser.add_argument(	"-s","--step", type = int,
-			help = "step size for making k-mers; if kmer_1 = (1, k), kmer_2 = (1+s, k+s)" )
+			help = "step size for making k-mers; if kmer_1 = (1, k), kmer_2 = (1+s, k+s) [default: same as k-mer size]" )
 parser.add_argument(	"-M","--msbwt",
 			default = "./",
 			help = "globbing expression to find directories containing msBWT components" )
@@ -42,15 +43,27 @@ parser.add_argument(	"-n","--normalize", type = readable_dir,
 parser.add_argument(	"-R","--revcomp", action = "store_true",
 			default = None,
 			help = "normalize against both k-mer and its reverse complement (if reference msBWT is not from an assembled genome)" )
+parser.add_argument(	"-a", "--alleles", action = "store_true",
+			default = False,
+			help = "compute 'allele scores': try to guess number of alleles from reads" )
+parser.add_argument(	"--alpha", type = float,
+			default = 2.0,
+			help = "hyperparameter for beta prior on allele frequency: alpha [default:%(default)f]" )
+parser.add_argument(	"--beta", type = float,
+			default = 2.0,
+			help = "hyperparameter for beta prior on allele frequency: beta [default:%(default)f]" )
+parser.add_argument(	"-m", "--maf", type = float,
+			default = 0.01,
+			help = "minimum minor-allele frequency (MAF) at which to consider variant sites when counting alleles [default: %(default)f]" )
 parser.add_argument(	"-S","--summarize", action = "store_true",
 			default = False,
 			help = "aggregate counts over the intervals in 'regions' file, instead of reporting k-mer-level counts" )
 parser.add_argument(	"-x","--minhits", type = int,
-			default = 3,
-			help = "in summary mode, trim k-mers with (strictly) fewer than this many hits" )
+			default = 2,
+			help = "in summary mode, trim k-mers with (strictly) fewer than this many hits [default: %(default)s]" )
 parser.add_argument(	"-X","--maxhits", type = int,
 			default = 10000,
-			help = "in summary mode, trim k-mers with (strictly) greater than this many hits" )
+			help = "in summary mode, trim k-mers with (strictly) greater than this many hits [default: %(default)s]" )
 parser.add_argument(	"-v","--verbose", action = "store_true",
 			default = False,
 			help = "print a status trace to stderr" )
@@ -163,9 +176,21 @@ for r in regions:
 		if (count_sum) == 0:
 			zeros += 1
 
+		## compute allele scores, if requested
+		## only makes sense in context of a single target msBWT, and for reads with reasonable number (1 < x < 5000?) of hits
+		## NB: this is expensive, because it jumps all around FM-index to reconstruct reads
+		allele_score = "NA"
+		if args.alleles and len(msbwt) == 1 and count_sum > args.minhits and count_sum < args.maxhits:
+			reads = util.get_reads(msbwt[0], str(seq), revcomp = True)
+			reads.pseudoalign(k = args.kmer)
+			if args.verbose:
+				print reads.pretty_alignment()
+				print reads.call_variant_sites(args.maf)
+			allele_score = reads.count_haplotypes(args.alpha, args.beta)
+
 		## fine-grained mode: print results for each k-mer
 		if not args.summarize:
-			print kmer.chrom, kmer.start, kmer.end, seq, count_f, count_r, count_sum, count_ref, norm_count
+			print kmer.chrom, kmer.start, kmer.end, seq, count_f, count_r, count_sum, count_ref, norm_count, allele_score
 
 		# except Exception as e:
 		# 	# print "Sequence was: {}; searched failed.".format(seq)
