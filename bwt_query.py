@@ -1,9 +1,9 @@
 #! /usr/bin/env python
 
-## --- bwt_query.py --- ##
+## --- snoop/bwt_query.py --- ##
 ##	Date: 22 Sep 2014
-##	Updated: 12 Oct 2014
-##	Purpose: Query a BWT at command-line, and dump hits in a nicely-aligned format (like csbio website does)
+##	Updated: 14 Oct 2014
+##	Purpose: Query a BWT at command-line; dump hits in a nicely-aligned format (like csbio website does) and estimate number of haplotypes present
 
 ## 	TODO
 ##	 * also query on reverse complement
@@ -16,9 +16,7 @@ import glob
 
 import MUSCython.MultiStringBWTCython as ms
 
-from common import *
-from snoop import util
-import dna
+from snoop import util, io, dna
 
 parser = argparse.ArgumentParser(description = "Simple utility for dumping reads from msBWT in an alignment-like format")
 parser.add_argument(	"-M", "--msbwt", type = str,

@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-## --- kmer_profile.py --- ##
+## --- snoop/kmer_profile.py --- ##
 ##      Date: 13 August 2014
 ##      Udpated: 29 September 2014
 ##      Purpose: given a list of msBWTs, generate a (possibly-downsampled) k-mer kmer_profile
@@ -12,14 +12,11 @@ import numpy as np
 
 import MUSCython.MultiStringBWTCython as ms
 
-from common import *
-import snoop.util
-import snoop.kmers
-import dna
+from snoop import util, io, dna, kmers
 
 ## parse command-line arguments
 parser = argparse.ArgumentParser(description = "Utility for generating a k-mer profile from a set of msBWTs.")
-parser.add_argument(	"-M","--msbwt", nargs = "+", type = readable_dir,
+parser.add_argument(	"-M","--msbwt", nargs = "+", type = io.readable_dir,
 			help = "one or more msBWT paths" )
 parser.add_argument(	"-k","--kmer", type = int,
 			default = 30,
@@ -41,7 +38,7 @@ parser.add_argument(	"-N","--maxk", type = float,
 parser.add_argument(	"-s","--seed", type = int,
 			default = None,
 			help = "seed for RNG which controls downsampling; set it manually for reproducible results [default: %(default)s]" )
-parser.add_argument(	"-o", "--output", type = writeable_or_stdout_handle,
+parser.add_argument(	"-o", "--output", type = io.writeable_or_stdout_handle,
 			default = None,
 			help = "file to which to write the (possibly-downsampled, abundance-thresholded) k-mer profile (use '-' for stdout) [default: %(default)s]" )
 parser.add_argument(	"-v","--verbose", action = "store_true",

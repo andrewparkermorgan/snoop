@@ -1,9 +1,9 @@
 #! /nas02/apps/python-2.7.1/bin/python
 ## /usr/bin/env python
 
-## --- count_reference_kmers.py --- ##
+## --- snoop/count_reference_kmers.py --- ##
 ##	Date: 17 June 2014
-##	Udpated: 6 Oct 2014 (allow normalization against a 'reference' BWT)
+##	Udpated: 14 Oct 2014 (estimate number of haplotypes present in the result of each query)
 ##	Purpose: given a list of genomic intervals (in bed format) and a reference sequence, generate k-mers and count occurrences of each in a msBWT
 
 import os
@@ -14,9 +14,7 @@ import tempfile
 import glob
 import numpy
 
-from common import *
-from snoop import util
-import dna
+from snoop import util, io, dna
 
 import pybedtools
 import pyfasta
@@ -26,7 +24,7 @@ parser = argparse.ArgumentParser(description = "Utility for generating and count
 parser.add_argument(	"-r","--regions", type = argparse.FileType("rU"),
 			required = True,
 			help = "list of regions (in bed format) for which to make k-mers" )
-parser.add_argument(	"-g","--genome", type = readable_file,
+parser.add_argument(	"-g","--genome", type = io.readable_file,
 			default = "$GENOMES/mm10/mm10.fa",
 			help = "reference genome fasta file from which to obtain k-mer sequences [default: %(default)s]" )
 parser.add_argument(	"-k","--kmer", type = int,
@@ -37,7 +35,7 @@ parser.add_argument(	"-s","--step", type = int,
 parser.add_argument(	"-M","--msbwt",
 			default = "./",
 			help = "globbing expression to find directories containing msBWT components" )
-parser.add_argument(	"-n","--normalize", type = readable_dir,
+parser.add_argument(	"-n","--normalize", type = io.readable_dir,
 			default = None,
 			help = "msBWT against which to normalize abundances of each queried k-mer" )
 parser.add_argument(	"-R","--revcomp", action = "store_true",

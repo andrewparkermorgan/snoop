@@ -2,7 +2,7 @@
 
 ## --- snoop/util.py --- ##
 ##	Date: 12 Oct 2014
-##	Updated: NA
+##	Updated: 14 Oct 2014
 ##	Purpose: Utility functions for retrieving and manipulating reads from msBWTs
 
 import os
@@ -14,8 +14,7 @@ import scipy.stats as sp
 
 import MUSCython.MultiStringBWTCython as ms
 
-from common import *
-import dna
+from snoop import io, dna
 
 ORIENTATION_FWD = 0
 ORIENTATION_REV = 1
@@ -222,7 +221,7 @@ def load_bwts(bwt_dirs):
 
 	msbwt = []
 	for ff in bwt_dirs:
-		if not readable_dir(ff):
+		if not io.readable_dir(ff):
 			continue
 		try:
 			msbwt.append( ms.loadBWT(ff) )
@@ -330,13 +329,16 @@ def _merge_rows(aln, alphabet = "ACGT"):
 			for s in range(0, j):
 				if row == seqs[s]:
 					matches.append(s)
-					counts[s] += 1
-			if len(matches) == 0:
+			if len(matches):
+				match_weights = [ counts[x] for x in matches ]
+				addto = match_weights.index(max(match_weights))
+				counts[addto] += 1
+			else:
 				#print row
 				#print seqs[s]
 				j += 1
 				seqs.append(row)
-				counts.append(1)
+				counts.append(1.0)
 
 	return counts
 
