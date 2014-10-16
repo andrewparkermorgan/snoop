@@ -8,13 +8,15 @@
 import os
 import sys
 import collections
+import itertools
 import copy
+import re
 import numpy as np
 import scipy.stats as sp
 
 import MUSCython.MultiStringBWTCython as ms
 
-from snoop import io, dna
+from snoop import io, dna, haplotype
 
 ORIENTATION_FWD = 0
 ORIENTATION_REV = 1
@@ -92,6 +94,7 @@ class ReadSet:
 		self.orientation = []
 		self.score = None
 		self.nhaplotypes = None
+		self.haplotypes = None
 		self._spacer = spacer
 
 		## iterate over input
@@ -180,8 +183,17 @@ class ReadSet:
 	def count_haplotypes(self, alpha = 1, beta = 1):
 		if self.alignment is None:
 			raise AttributeError
-		if self.nhaplotypes is None:
-			self.nhaplotypes = _count_haplotypes(self.alignment, alpha = alpha, beta = beta, alphabet = self.alphabet)
+		(n, hapdict) = _count_haplotypes(self.alignment, alpha = alpha, beta = beta, alphabet = self.alphabet)
+		self.nhaplotypes = n
+		self.haplotypes = hapdict
+		return self.nhaplotypes
+
+	def simply_count_haplotypes(self, maf, dist = 100):
+		if self.alignment is None:
+			raise AttributeError
+		(n, hapdict) = _simple_count_haplotypes(self.alignment, maf = maf, dist = dist, alphabet = self.alphabet)
+		self.nhaplotypes = n
+		self.haplotypes = hapdict
 		return self.nhaplotypes
 
 	def pretty_alignment(self):
@@ -192,11 +204,29 @@ class ReadSet:
 
 		return pretty
 
+	def extract_haplotypes(self, maf = 1):
+
+		if self.alignment is not None:
+			haps = haplotype.extract_haplotypes(self.alignment)
+			threshold = maf
+			if maf < 1.0:
+				threshold = float(len(haps))*maf
+			hapdict = {}
+			nhaps = 0
+			for (row, seqs, scores) in haps:
+				hapdict.update( {row.seq: scores[0][1]} )
+				nhaps += (scores[0][1] > threshold)
+
+			self.haplotypes = hapdict
+			self.nhaplotypes = nhaps
+		return (self.nhaplotypes, self.haplotypes)
+
 class PseudoalignedRow:
 
 	def __init__(self, seq = "", alphabet = "ACGT"):
 		self.seq = seq
 		self._alphabet = alphabet
+		self.nonmissing = sum([ x in alphabet for x in seq ])
 
 	def __len__(self):
 		return len(self.seq)
@@ -214,6 +244,46 @@ class PseudoalignedRow:
 
 	def __str__(self):
 		return "".join(self.seq) + "\n"
+
+	## merge two aligned rows, assuming 'other' < 'self' (in the sense that the first nonmissing char in self occurs before that in other)
+	def merge(self, other):
+
+		if not isinstance(other, PseudoalignedRow):
+			raise ArgumentError
+		if len(self) != len(other):
+			raise ArgumentError
+
+		#print other.seq
+		#print self.seq
+		pattern = r"[{}]".format(re.escape(self._alphabet))
+		m = re.search(pattern, self.seq)
+		if m:
+			right = self.seq[ m.start(): ]
+			left = other.seq[ :m.start() ]
+			return PseudoalignedRow(left + right, self._alphabet)
+		else:
+			## nothing to merge with; return self unchanged
+			return self
+
+	## return indices of differences between two aligned rows
+	def diffs(self, other):
+
+		if not isinstance(other, PseudoalignedRow):
+			raise ArgumentError
+		if len(self) != len(other):
+			raise ArgumentError
+
+		diffs = []
+		for i in range(0, len(self)):
+			if (self.seq[i] in self._alphabet and other.seq[i] in self._alphabet):
+				if self.seq[i] != other.seq[i]:
+					diffs.append(i)
+
+		if len(diffs):
+			return diffs
+		else:
+			return None
+
 
 ## wrapper to load BWTs residing on a given list of paths, and return them as a list of objects
 ## returns None if no BWTs were loaded successfully
@@ -286,32 +356,48 @@ def _pseudoalign(reads, dollars, ori, k = 0, spacer = "-"):
 	lefts = [ l-d for (d,l) in zip(dollars, lens) ]
 	rights = [ d-k for d in dollars ]
 
-	## sort reads by offset
-	stack = [ y for (x,y) in sorted(zip(dollars, range(0, nreads))) ]
-	aln = [ [spacer] for i in range(0, nreads) ]
-	for ii in range(0, len(stack)):
-		aln[stack[ii]][:] = spacer*(max(lefts) - lefts[stack[ii]]) + reads[stack[ii]] + spacer*(maxlen - dollars[stack[ii]])
+	## pad reads on either size of target k-mer so tat all have same padded width
+	aln = [ spacer for i in range(0, nreads) ]
+	for i in range(0, nreads):
+		aln[i] = spacer*(max(lefts) - lefts[i]) + reads[i] + spacer*(maxlen - dollars[i])
 
+	## sort rows in alignment, then return it
+	aln.sort()
+	aln.reverse()
 	return aln
 
 ## compute weighted Shannon entropy of a 1d numpy array
-## alpha,beta are shape,scale parameters of beta prior on allele freqs
-def _shannon_entropy(col, _alpha, _beta):
+## alpha,beta are lists of parameters of negative binomial prior on haplotype counts
+def _shannon_entropy(col, alpha, beta):
 
 	if not isinstance(col, (np.ndarray,)):
 		col = np.array(col, shape = len(col), dtype = float)
 
+	if len(alpha) != len(beta):
+		return ArgumentError
+
+	priors = []
+	for i in range(0, len(alpha)):
+		priors.append( sp.nbinom(alpha[i], beta[i]) )
+
+	col = np.sort(np.around(col))
 	if col.shape[0] == 1:
 		return 0.0
 	else:
-		freq = col/np.sum(col)
-		prior = sp.beta.pdf(freq, _alpha, _beta)
-		freq = freq*prior
+		## apply prior scaling
+		weights = np.zeros_like(col, dtype = float)
+		for i in range(0, col.shape[0]):
+			weights[i] = np.max([ p.pmf(col[i]) for p in priors ])
+		#print col
+		#print weights
+		freq = col * weights
 		freq = freq/np.sum(freq)
+		#print freq
 		H = -1 * freq * np.log2(freq)
 		#print H
 		return np.nansum(H)
 
+## TODO: FIX THIS; it is merging haplotypes that should be distinct
 ## merge sequences in a pseudoalignment into pseudohaplotypes and return their counts
 def _merge_rows(aln, alphabet = "ACGT"):
 
@@ -328,30 +414,75 @@ def _merge_rows(aln, alphabet = "ACGT"):
 			matches = []
 			for s in range(0, j):
 				if row == seqs[s]:
+					seqs[s] = row.merge(seqs[s])
 					matches.append(s)
 			if len(matches):
-				match_weights = [ counts[x] for x in matches ]
-				addto = match_weights.index(max(match_weights))
-				counts[addto] += 1
+				#print "there is a match"
+				if len(matches) == 1:
+					for m in matches:
+						counts[m] += 1.0/len(matches)
+			#if len(matches):
+				#match_weights = [ counts[x] for x in matches ]
+				#addto = match_weights.index(max(match_weights))
+				#counts[addto] += 1
 			else:
+				#print "inserting new sequence into cache"
 				#print row
 				#print seqs[s]
 				j += 1
 				seqs.append(row)
 				counts.append(1.0)
 
-	return counts
+	return (counts, [ s.seq for s in seqs])
 
-def _count_haplotypes(aln, alpha = 1, beta = 1, alphabet = "ACGT"):
+## estimate number of haplotypes present in reads, with negative binomial prior
+def _count_haplotypes(aln, alpha = [1], beta = [1], alphabet = "ACGT"):
 
 	nseq = len(aln)
 	if nseq == 1:
 		return 1.0
 	else:
-		counts = _merge_rows(aln, alphabet)
+		(counts, seqs) = _merge_rows(aln, alphabet)
+		# print dict(zip(seqs, counts))
 		counts = np.array(counts)
-		return np.power(2, _shannon_entropy(counts, alpha, beta))
+		return ( np.power(2, _shannon_entropy(counts, alpha, beta)), dict(zip(seqs, counts)) )
 
+## do naive haplotype counting
+def _simple_count_haplotypes(aln, maf = 1.0, dist = 100, alphabet = "ACGT"):
+	
+	maf = float(maf)
+	nseq = len(aln)
+	if nseq == 1:
+		return (1, { "".join(aln[1]) : 1 })
+	else:
+		(counts, seqs) = _merge_rows(aln, alphabet)
+		total = sum(counts)
+		if maf < 1.0:
+			maf = round(float(total)*maf)
+		
+		seqs.sort()
+		seqs.reverse()
+		newseqs = [ PseudoalignedRow(seqs[i]) for i in range(0, len(counts)) if counts[i] > maf ]
+		newhaps = [ newseqs[0] ]
+		newcounts = [1]
+		firstdiff = -1
+		j = 0
+		while len(newseqs) > 1:
+			d = newseqs[0].diffs(newseqs[1])
+			if d is not None:
+				if min(d) - firstdiff < dist - 1:
+					j += 1
+					newhaps.append(newseqs[1])
+					newcounts.append(1)
+				firstdiff = max(d)
+			else:
+				newcounts[j] += 1
+			newseqs.pop(1)
+
+		# seqdict = dict(zip(seqs, counts))
+		# print { h.seq: seqdict[h.seq] for h in newhaps }
+		return ( len(newhaps), dict(zip([ h.seq for h in newhaps ], newcounts)) )
+			
 
 ## step through pseudoalignment of reads and find sites which have variant alleles above some specified frequency
 def _call_variant_sites(aln, maf, alphabet = "ACGT"):

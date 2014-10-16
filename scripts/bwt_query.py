@@ -16,7 +16,7 @@ import glob
 
 import MUSCython.MultiStringBWTCython as ms
 
-from snoop import util, io, dna
+from snoop import util, io, dna, haplotype
 
 parser = argparse.ArgumentParser(description = "Simple utility for dumping reads from msBWT in an alignment-like format")
 parser.add_argument(	"-M", "--msbwt", type = str,
@@ -28,12 +28,12 @@ parser.add_argument(	"-s", "--spacer", type = str,
 parser.add_argument(	"-f", "--maf", type = float,
 			default = 0.1,
 			help = "minimum 'minor allele frequency' to accept site as variant [default:%(default)f]" )
-parser.add_argument(	"-a", "--alpha", type = float,
-			default = 1.0,
-			help = "hyperparameter for beta prior on allele frequency: alpha [default:%(default)f]" )
-parser.add_argument(	"-b", "--beta", type = float,
-			default = 1.0,
-			help = "hyperparameter for beta prior on allele frequency: beta [default:%(default)f]" )
+parser.add_argument(	"-a", "--alpha", type = float, nargs = "+",
+			default = [1.0],
+			help = "hyperparameter for prior on allele counts: alpha [default:%(default)f]" )
+parser.add_argument(	"-b", "--beta", type = float, nargs = "+",
+			default = [1.0],
+			help = "hyperparameter for prior on allele counts: beta [default:%(default)f]" )
 parser.add_argument(	"-r", "--revcomp", action = "store_true",
 			default = False,
 			help = "also search for this query's reverse complement [default: False]" )
@@ -55,8 +55,16 @@ for q in args.queries:
 				print "".join(reads.alignment[j][:])
 			varcodes = reads.call_variant_sites(args.maf)
 			print varcodes
+			print "Simple haplotype count:", reads.simply_count_haplotypes(args.maf)
 			print "Consistency score:", reads.consistency_score(args.maf)
-			print "Number of haplotypes:", reads.count_haplotypes(args.alpha, args.beta)
+			print "Priors on haplotype frequencies:", zip(args.alpha, args.beta)
+			print "Regularized number of haplotypes:", reads.count_haplotypes(args.alpha, args.beta)
+			print ""
+			print "Observed haplotypes:", reads.extract_haplotypes()[0]
+			print varcodes
+			for (h, n) in reads.haplotypes.iteritems():
+				print str(h) + " " + str(n)
+
 		else:
 			print "no hits found for query: " + q
 		print ""

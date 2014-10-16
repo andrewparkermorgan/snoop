@@ -44,12 +44,12 @@ parser.add_argument(	"-R","--revcomp", action = "store_true",
 parser.add_argument(	"-a", "--alleles", action = "store_true",
 			default = False,
 			help = "compute 'allele scores': try to guess number of alleles from reads" )
-parser.add_argument(	"--alpha", type = float,
+parser.add_argument(	"--alpha", type = float, nargs = "+",
 			default = 2.0,
-			help = "hyperparameter for beta prior on allele frequency: alpha [default:%(default)f]" )
-parser.add_argument(	"--beta", type = float,
+			help = "hyperparameter for prior on allele counts: alpha [default:%(default)f]" )
+parser.add_argument(	"--beta", type = float, nargs = "+",
 			default = 2.0,
-			help = "hyperparameter for beta prior on allele frequency: beta [default:%(default)f]" )
+			help = "hyperparameter for prior on allele counts: beta [default:%(default)f]" )
 parser.add_argument(	"-m", "--maf", type = float,
 			default = 0.01,
 			help = "minimum minor-allele frequency (MAF) at which to consider variant sites when counting alleles [default: %(default)f]" )
@@ -177,14 +177,15 @@ for r in regions:
 		## compute allele scores, if requested
 		## only makes sense in context of a single target msBWT, and for reads with reasonable number (1 < x < 5000?) of hits
 		## NB: this is expensive, because it jumps all around FM-index to reconstruct reads
-		allele_score = "NA"
+		(allele_score, nhaps, asymm) = ("NA","NA","NA")
 		if args.alleles and len(msbwt) == 1 and count_sum > args.minhits and count_sum < args.maxhits:
 			reads = util.get_reads(msbwt[0], str(seq), revcomp = True)
 			reads.pseudoalign(k = args.kmer)
 			if args.verbose:
 				print reads.pretty_alignment()
 				print reads.call_variant_sites(args.maf)
-			allele_score = reads.count_haplotypes(args.alpha, args.beta)
+			(allele_score, haps) = reads.extract_haplotypes(args.maf)
+			#(nhaps, asymm) = reads.consistency_score(args.maf)
 
 		## fine-grained mode: print results for each k-mer
 		if not args.summarize:
