@@ -17,7 +17,7 @@ import scipy.stats as sp
 
 import MUSCython.MultiStringBWTCython as ms
 
-from snoop import *
+from snoop import io, dna, haplotype
 
 ORIENTATION_FWD = 0
 ORIENTATION_REV = 1

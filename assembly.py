@@ -12,7 +12,7 @@ import pickle
 import collections
 import numpy as np
 
-from snoop import *
+from snoop import util
 from MUS import TranscriptBuilder # actually does the assembly
 
 ASSEMBLE_FORWARD = True
@@ -65,7 +65,7 @@ def _build_graph(msbwt_path, seed, end_seeds = [], k = 70, count_k = 70, directi
 	dot_fn = fn + ".dot.txt"
 
 	## call the assembler
-	logger = _init_logger()
+	logger = util._init_logger()
 	tb = TranscriptBuilder.Assembler(msbwt_path, _settings, logger)
 	tb.extendSeed(seed, end_seeds)
 
