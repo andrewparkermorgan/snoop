@@ -2,7 +2,7 @@
 
 ## --- snoop/haplotype.py --- ##
 ##	Date: 12 Oct 2014
-##	Updated: 14 Oct 2014
+##	Updated: 31 Oct 2014
 ##	Purpose: Functions for extracting haplotypes from queries against a msBWT
 
 import os

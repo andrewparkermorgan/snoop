@@ -55,7 +55,7 @@ for q in args.queries:
 				print "".join(reads.alignment[j][:])
 			varcodes = reads.call_variant_sites(args.maf)
 			print varcodes
-			print "Simple haplotype count:", reads.simply_count_haplotypes(args.maf)
+			# print "Simple haplotype count:", reads.simply_count_haplotypes(args.maf)
 			print "Consistency score:", reads.consistency_score(args.maf)
 			print "Priors on haplotype frequencies:", zip(args.alpha, args.beta)
 			print "Regularized number of haplotypes:", reads.count_haplotypes(args.alpha, args.beta)

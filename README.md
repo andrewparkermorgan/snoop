@@ -16,6 +16,9 @@ Dependencies
 
 Scripts
 --
+* `fa2bwt.py`: build a msBWT from one or more fasta files (ie. a reference genome)
 * `bwt_query.py`: query a msBWT with an arbitrary string; return matching strings in a pretty alignment
 * `kmer_profile.py`: compute an approximation to the Jensen-Shannon divergence between a pair of msBWTs, possibly with downsampling to save time
 * `count_reference_kmers.py`: given one or more msBWTs, a reference sequence, and a BED file specifying intervals on that sequence, query the msBWT(s) with (arbitrarily-spaced) *k*-mers from the reference and return the counts
+* `assemble_me_this.py`: given a msBWT and a seed sequence, perform targeted de novo assembly, trying to extend seed as far as possible before things get messy
+* `find_insertions.py`: given a bed file of k-mer sequences and counts along some reference (probably from `count_reference_kmers.py`), attempt to find transposable-element insertions which are absent in that reference

@@ -2,11 +2,12 @@
 
 ## --- snoop/util.py --- ##
 ##	Date: 12 Oct 2014
-##	Updated: 14 Oct 2014
+##	Updated: 31 Oct 2014
 ##	Purpose: Utility functions for retrieving and manipulating reads from msBWTs
 
 import os
 import sys
+import logging
 import collections
 import itertools
 import copy
@@ -16,10 +17,26 @@ import scipy.stats as sp
 
 import MUSCython.MultiStringBWTCython as ms
 
-from snoop import io, dna, haplotype
+from snoop import *
 
 ORIENTATION_FWD = 0
 ORIENTATION_REV = 1
+
+## stuff related to logging
+LOG_STREAM = sys.stderr
+
+def _init_logger(stream = LOG_STREAM):
+	'''
+	This code taken from Shunping's Lapels for initializing a logger
+	'''
+	logger = logging.getLogger('root')
+	logger.setLevel(logging.DEBUG)
+	ch = logging.StreamHandler(stream)
+	ch.setLevel(logging.INFO)
+	formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", "%Y-%m-%d %H:%M:%S")
+	ch.setFormatter(formatter)
+	logger.addHandler(ch)
+	return logger
 
 ## abstract container for a single read as stored in a msBWT
 class Read:
@@ -96,6 +113,7 @@ class ReadSet:
 		self.nhaplotypes = None
 		self.haplotypes = None
 		self._spacer = spacer
+		self.pivot = None
 
 		## iterate over input
 		for obj in read_iter:
@@ -165,7 +183,7 @@ class ReadSet:
 		if spacer is not None and len(spacer):
 			self._spacer = str(spacer)[0]
 		if self.alignment is None:
-			self.alignment = _pseudoalign(self.seq, self.offset, self.orientation, k, self._spacer)
+			(self.alignment, self.pivot) = _pseudoalign(self.seq, self.offset, self.orientation, k, self._spacer)
 		return self.alignment
 
 	def consistency_score(self, maf = 0.0, eps = 0.00001):
@@ -315,6 +333,17 @@ def _unrotate_read(raw_seq = None):
 		dollar = raw_seq.find("$")
 		return ( raw_seq[ (dollar+1): ] + raw_seq[ 0:dollar ], dollar )
 
+## given a bwt and a query string, count occurrences in both orientations
+## returns the count (as integer?)
+def count_reads(bwt, query, revcomp = True):
+
+	count = 0
+	query = str(query).upper()
+	count += bwt.countOccurrencesOfSeq(query)
+	if revcomp:
+		count += bwt.countOccurrencesOfSeq( dna.revcomp(query) )
+	return count
+
 ## given a bwt and a query string, return the (resurrected) hits
 ## returns a ReadSet object
 def get_reads(bwt, query, revcomp = False):
@@ -342,6 +371,9 @@ def get_reads(bwt, query, revcomp = False):
 ## given lists of (resurrected) reads and dollar-indices, 'pseudoalign' them by centering them on the original query
 def _pseudoalign(reads, dollars, ori, k = 0, spacer = "-"):
 
+	if not len(reads):
+		return (None, -1)
+
 	nreads = len(reads)
 	lens = [ len(r) for r in reads ]
 	maxlen = max(lens)
@@ -355,6 +387,7 @@ def _pseudoalign(reads, dollars, ori, k = 0, spacer = "-"):
 
 	lefts = [ l-d for (d,l) in zip(dollars, lens) ]
 	rights = [ d-k for d in dollars ]
+	pivot = max(lefts)
 
 	## pad reads on either size of target k-mer so tat all have same padded width
 	aln = [ spacer for i in range(0, nreads) ]
@@ -364,7 +397,7 @@ def _pseudoalign(reads, dollars, ori, k = 0, spacer = "-"):
 	## sort rows in alignment, then return it
 	aln.sort()
 	aln.reverse()
-	return aln
+	return (aln, pivot)
 
 ## compute weighted Shannon entropy of a 1d numpy array
 ## alpha,beta are lists of parameters of negative binomial prior on haplotype counts
@@ -449,7 +482,7 @@ def _count_haplotypes(aln, alpha = [1], beta = [1], alphabet = "ACGT"):
 
 ## do naive haplotype counting
 def _simple_count_haplotypes(aln, maf = 1.0, dist = 100, alphabet = "ACGT"):
-	
+
 	maf = float(maf)
 	nseq = len(aln)
 	if nseq == 1:
@@ -459,7 +492,7 @@ def _simple_count_haplotypes(aln, maf = 1.0, dist = 100, alphabet = "ACGT"):
 		total = sum(counts)
 		if maf < 1.0:
 			maf = round(float(total)*maf)
-		
+
 		seqs.sort()
 		seqs.reverse()
 		newseqs = [ PseudoalignedRow(seqs[i]) for i in range(0, len(counts)) if counts[i] > maf ]
@@ -482,7 +515,7 @@ def _simple_count_haplotypes(aln, maf = 1.0, dist = 100, alphabet = "ACGT"):
 		# seqdict = dict(zip(seqs, counts))
 		# print { h.seq: seqdict[h.seq] for h in newhaps }
 		return ( len(newhaps), dict(zip([ h.seq for h in newhaps ], newcounts)) )
-			
+
 
 ## step through pseudoalignment of reads and find sites which have variant alleles above some specified frequency
 def _call_variant_sites(aln, maf, alphabet = "ACGT"):

@@ -9,6 +9,14 @@ import os
 import sys
 import numpy as np
 
+## simple function to return a k-mer generator, given some string
+def kmerize(seq, k, s = 1):
+
+	starts = xrange(0, len(seq)-k+1, s)
+	ends = [ i+k for i in starts if i+k-1 <= len(seq) ]
+	for (i,j) in zip(starts, ends):
+		yield seq[i:j]
+
 ## wrapper class for Matt's generator for the union of k-mers present in a list of msBWT objects
 class KmerIterator:
 
@@ -98,7 +106,7 @@ class KmerProfiler:
 			if self._j > self._maxiter:
 				break
 
-			(kmer, counts) = self._kmers.__next()__
+			(kmer, counts) = self._kmers.__next__()
 			## downsampling by randomly including or excluding this k-mer for each sapmle... why??
 			# flag = np.ones(n)
 			flag = 1
