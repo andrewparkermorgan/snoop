@@ -12,7 +12,7 @@ Dependencies
 * bedtools (http://bedtools.readthedocs.org/en/latest/)
 * pybedtools (http://pythonhosted.org/pybedtools/)
 * pyfasta (https://pypi.python.org/pypi/pyfasta/)
-* msbwt (https://pypi.python.org/pypi/msbwt)
+* msbwt >= 0.2.5 (https://pypi.python.org/pypi/msbwt)
 
 Scripts
 --
