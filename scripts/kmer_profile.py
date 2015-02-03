@@ -65,7 +65,11 @@ for (kmer, counts, jsd, cum_jsd) in profiler.profile():
 	outfields.append(jsd)
 	total_jsd = cum_jsd
 
-	args.output.write( "\t".join([str(x) for x in outfields]) + "\n" )
+	if args.unique:
+		if sum([ x > args.minhits for x in counts ]) == 1:
+			args.output.write( "\t".join([str(x) for x in outfields]) + "\n" )
+	else:
+		args.output.write( "\t".join([str(x) for x in outfields]) + "\n" )
 
 sys.stderr.write("Total Jensen-Shannon divergence: {}\n".format(total_jsd))
 # np.savetxt(sys.stderr, jsd)
