@@ -10,6 +10,7 @@ import os
 import sys
 import pickle
 import collections
+import argparse
 import numpy as np
 
 from snoop import util
@@ -57,7 +58,7 @@ def _build_graph(msbwt_path, seed, end_seeds = [], k = 70, count_k = 70, directi
 	## set up start and end seeds, trimming them to specifid k-mer size if needed
 	seed = seed[0:k]
 	for i in xrange(0, len(end_seeds)):
-		end_seeds[i] = end_seeds[i][0:kmerSize]
+		end_seeds[i] = end_seeds[i][0:k]
 
 	## set up output files
 	fn = "{}.k{}.count{}.min{}.n{}".format(outprefix, k, _settings["countK"], min_weight, _settings["numNodes"])
@@ -159,3 +160,31 @@ def greedy_assemble(*args, **kwargs):
 						break
 	
 	return seq
+
+## function to return command-line parser for parameters common to assembly tasks
+def assembly_args():
+
+	parser = argparse.ArgumentParser(add_help = False)
+	parser.add_argument(	"-n","--maxnodes", type = int,
+				default = 1000,
+				help = "maximum size of assembly graph, in number of nodes [default: %(default)d]" )
+	parser.add_argument(	"-L","--maxlength", type = int,
+				default = None,
+				help = "maximum length of final sequence to assemble, in bp [default: no limit]" )
+	parser.add_argument(	"-x", "--minweight", type = int,
+				default = 5,
+				help = "minimum weight of path to keep assembling [default: %(default)d]" )
+	parser.add_argument(	"-X", "--maxweight", type = int,
+				default = 3000,
+				help = "maximum weight of path to keep assembling [default: %(default)d]" )
+	parser.add_argument(	"-k", "--kmer", type = int,
+				default = 70,
+				help = "k-mer size to use in building assembly graph [default: %(default)d]" )
+	parser.add_argument(	"--count_kmer", type = int,
+				help = "k-mer size to use in calculating path weights [default: same as --kmer]" )
+	parser.add_argument(	"--prefix",
+				help = "prefix for output file: if specified, assembly graph will be dumped as pickle" )
+	parser.add_argument(	"--memmap", action = "store_true",
+				help = "use memmapped files to initialize BWT, instead of loading into memory [default: False]" )
+
+	return parser

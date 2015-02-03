@@ -3,7 +3,7 @@
 
 ## --- snoop/count_reference_kmers.py --- ##
 ##	Date: 17 June 2014
-##	Udpated: 14 Oct 2014 (estimate number of haplotypes present in the result of each query)
+##	Udpated: 27 Dec 2014 (allow bootstrap resampling of k-mer counts for getting CIs on sequence divergence)
 ##	Purpose: given a list of genomic intervals (in bed format) and a reference sequence, generate k-mers and count occurrences of each in a msBWT
 
 import os
@@ -12,7 +12,7 @@ import argparse
 import subprocess
 import tempfile
 import glob
-import numpy
+import numpy as np
 
 from snoop import util, io, dna
 
@@ -65,6 +65,9 @@ parser.add_argument(	"-X","--maxhits", type = int,
 parser.add_argument(	"-v","--verbose", action = "store_true",
 			default = False,
 			help = "print a status trace to stderr" )
+parser.add_argument(	"-B", "--bootstrap", type = int,
+			default = 0,
+			help = "in summary mode, generate bootstrap CIs for count of zeros using this many replicates [default: %(default)s]" )
 args = parser.parse_args()
 
 
@@ -103,6 +106,16 @@ if args.step is None:
 if args.verbose:
 	sys.stderr.write("Starting query loop.\n")
 
+## simple function for bootstrap resampling of a np array
+def resample(x):
+	n = len(x)
+	i = np.floor( np.random.rand(n)*len(x) ).astype(int)
+	return x[i]
+
+## apply some function to a bootstrap sample
+def bootstrap(x, fn, **kwargs):
+	return fn(resample(x, **kwargs))
+
 ## loop on regions
 for r in regions:
 
@@ -132,6 +145,7 @@ for r in regions:
 	## initialize counts for this region
 	width = r.end - r.start
 	agg = []
+	counts = []
 	zeros = 0
 
 	for kmer in kmers:
@@ -152,6 +166,7 @@ for r in regions:
 			count_f += msbwt[i].countOccurrencesOfSeq( str(seq) )
 			count_r += msbwt[i].countOccurrencesOfSeq( str(dna.revcomp(seq)) )
 		count_sum = count_f + count_r
+		counts.append(count_sum)
 
 		## count occurrences in reference msBWT
 		if args.normalize is not None:
@@ -203,10 +218,17 @@ for r in regions:
 		agg_trimmed = filter(lambda x: (x > args.minhits) and (x <= args.maxhits), agg)
 
 		if len(agg_trimmed):
-			med = numpy.median(agg_trimmed)
-			q = numpy.percentile(agg_trimmed, 25.0)
-			qqq = numpy.percentile(agg_trimmed, 75.0)
-			mu = numpy.mean(agg_trimmed)
+			med = np.median(agg_trimmed)
+			if args.bootstrap == 0:
+				## no bootstrapping; report order stats on k-mer counts
+				q = np.percentile(agg_trimmed, 25.0)
+				qqq = np.percentile(agg_trimmed, 75.0)
+			else:
+				## bootstrapping requested; report order stats on number of zeros
+				x = [ bootstrap(np.array(counts), lambda z: sum(z == 0)) for i in range(0, args.bootstrap) ]
+				q = np.percentile(x, 2.5)
+				qqq = np.percentile(x, 97.5)
+			mu = np.mean(agg_trimmed)
 
 		print r.chrom, r.start, r.end, zeros, med, mu, q, qqq
 

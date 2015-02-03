@@ -39,7 +39,7 @@ parser.add_argument(	"-s","--seed", type = int,
 			default = None,
 			help = "seed for RNG which controls downsampling; set it manually for reproducible results [default: %(default)s]" )
 parser.add_argument(	"-o", "--output", type = io.writeable_or_stdout_handle,
-			default = None,
+			default = "-",
 			help = "file to which to write the (possibly-downsampled, abundance-thresholded) k-mer profile (use '-' for stdout) [default: %(default)s]" )
 parser.add_argument(	"-v","--verbose", action = "store_true",
 			default = False,
@@ -47,8 +47,8 @@ parser.add_argument(	"-v","--verbose", action = "store_true",
 args = parser.parse_args()
 
 
-print "Using the following msBWTs:"
-print args.msbwt
+sys.stderr.write("Using the following msBWTs:\n")
+sys.stderr.write(str(args.msbwt) + "\n")
 
 msbwt = util.load_bwts(args.msbwt)
 
@@ -65,7 +65,7 @@ for (kmer, counts, jsd, cum_jsd) in profiler.profile():
 	outfields.append(jsd)
 	total_jsd = cum_jsd
 
-	args.output.write( "\t".join(outfields) + "\n" )
+	args.output.write( "\t".join([str(x) for x in outfields]) + "\n" )
 
-print "Total Jensen-Shannon divergence:", total_jsd
+sys.stderr.write("Total Jensen-Shannon divergence: {}\n".format(total_jsd))
 # np.savetxt(sys.stderr, jsd)

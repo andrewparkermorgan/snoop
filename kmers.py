@@ -106,7 +106,7 @@ class KmerProfiler:
 			if self._j > self._maxiter:
 				break
 
-			(kmer, counts) = self._kmers.__next__()
+			#(kmer, counts) = self._kmers.__next__()
 			## downsampling by randomly including or excluding this k-mer for each sapmle... why??
 			# flag = np.ones(n)
 			flag = 1
@@ -119,10 +119,10 @@ class KmerProfiler:
 				continue
 
 			## compute element-wise Jensen-Shannon divergence (JSD)
-			probs = [ (float(max(counts[i], threshold))/sizes[i]) for i in range(0, len(self._bwts)) ]
+			probs = [ (float(max(counts[i], self._threshold))/self.sizes[i]) for i in range(0, len(self._bwts)) ]
 			mean_prob = np.average(probs, weights = self.weights)
-			logged = [ np.log(probs[i]/mean_prob)*probs[i] for i in range(0, len(self._msbwt)) ]
+			logged = [ np.log(probs[i]/mean_prob)*probs[i] for i in range(0, len(self._bwts)) ]
 			jsd = np.average(logged, weights = self.weights)
 			self._total_jsd += jsd * flag
 
-			yield (kmer, counts, jsd, total_jsd)
+			yield (kmer, counts, jsd, self._total_jsd)
