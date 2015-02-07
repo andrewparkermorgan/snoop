@@ -110,16 +110,16 @@ def consensus(seqList, alphabet = "ACGT"):
 
 	if len(seqList) == 0:
 		return '', []
-	
+
 	N = len(seqList[0])
 	counter = np.zeros(dtype='<u8', shape=(N, ))
 	posCount = [dict() for i in xrange(N)]
-	
+
 	for seq in seqList:
 		for i, c in enumerate(seq):
 			posCount[i][c] = posCount[i].get(c, 0) + 1
 	result = ""
-	
+
 	for i in xrange(N):
 		pairs = [(posCount[i][c], c) for c in posCount[i].iterkeys() if c in alphabet ]
 		count, base = (N, "-") if (len(pairs) == 0) else max(pairs)
@@ -127,7 +127,7 @@ def consensus(seqList, alphabet = "ACGT"):
 			if b != base:
 				counter[i] += c
 		result += base
-	
+
 	return ( PseudoalignedRow(result), counter )
 
 ## JMH 15 Oct 2014
@@ -147,27 +147,27 @@ def extract_haplotypes(aln):
 	currSeqs = aln
 
 	while len(currSeqs) > 0 and previousConsensus.diffs(currentConsensus):
-		
+
 		nextSeqs = []
 		consensusSeqs = []
-		
+
 		#we will fill in consensus Seqs downstream
 		finishedHaps.append((currentConsensus, consensusSeqs, []))
-		
+
 		#first get all exact matching reads
 		for seq in currSeqs:
 			if not currentConsensus.diffs(PseudoalignedRow(seq)):
 				consensusSeqs.append(seq)
 			else:
 				nextSeqs.append(seq)
-		
+
 		finishedHaps[-1][2].append((0, len(consensusSeqs)))
-		
+
 		#update these things
 		previousConsensus = currentConsensus
 		currSeqs = nextSeqs
 		currentConsensus, currentScorer = consensus(currSeqs)
-		
+
 		#check if the next consensus is identical
 		acceptedScore = 1
 		while len(currSeqs) > 0 and not previousConsensus.diffs(currentConsensus):
@@ -178,17 +178,17 @@ def extract_haplotypes(aln):
 				calcScore = currentConsensus.score(PseudoalignedRow(seq), currentScorer)
 				if calcScore < minScore and calcScore > acceptedScore:
 					minScore = calcScore
-				
+
 				if calcScore <= acceptedScore:
 					consensusSeqs.append(seq)
 				else:
 					nextNextSeqs.append(seq)
 			finishedHaps[-1][2].append((acceptedScore, len(nextSeqs)-len(nextNextSeqs)))
-			
+
 			nextSeqs = nextNextSeqs
 			currSeqs = nextSeqs
 			currentConsensus, currentScorer = consensus(currSeqs)
-			
+
 			#acceptedScore += 1
 			acceptedScore = minScore
 
@@ -196,3 +196,4 @@ def extract_haplotypes(aln):
 		consensusSeqs.append(seq)
 
 	return finishedHaps
+	

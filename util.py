@@ -17,6 +17,11 @@ import scipy.stats as sp
 
 import MUSCython.MultiStringBWTCython as ms
 
+from cogent import LoadSeqs, DNA
+from cogent.app import muscle
+from cogent.core.alignment import SequenceCollection, Alignment
+from cogent.parse.fasta import MinimalFastaParser
+
 from snoop import io, dna, haplotype
 
 ORIENTATION_FWD = 0
@@ -186,6 +191,11 @@ class ReadSet:
 			(self.alignment, self.pivot) = _pseudoalign(self.seq, self.offset, self.orientation, k, self._spacer)
 		return self.alignment
 
+	def align(self, force = True):
+		if self.alignment is None or force:
+			self.alignment = _align_reads(self.seq)
+		return self.alignment
+
 	def consistency_score(self, maf = 0.0, eps = 0.00001):
 		if self.alignment is None:
 			raise AttributeError
@@ -238,6 +248,72 @@ class ReadSet:
 			self.haplotypes = hapdict
 			self.nhaplotypes = nhaps
 		return (self.nhaplotypes, self.haplotypes)
+
+
+	## count number of varibale sites in a true MSA of reads
+	def count_variable_sites(self, maf = 1, min_coverage = 5, spacer = None):
+
+		if self.alignment is None:
+			self.align(force = True)
+		# since reads don't all start at same site, next part is required to discriminate between true gaps and padding
+		self.alignment = _mask_padding_gaps(self.alignment, spacer)
+
+		if spacer is None:
+			spacer = self._spacer
+
+		passing = []
+		variable = []
+		pos_freq = self.alignment.getColumnFreqs()
+		for i in range(0, len(pos_freq)):
+			col = pos_freq[i]
+			col_filtered = _freqs_no_gaps(col, self.alphabet + "-")
+			total = _dict_sum_if(col_filtered)
+			if total >= min_coverage:
+				passing.append(i)
+			variable.append( len(_dict_sum_if(col_filtered, lambda x: x >= maf)) > 1)
+
+		## convert to run-length encoding in order to avoid over-counting: consecutive variants are assumed a single event
+		## TODO: impose the consecutive-event rule only for gaps; allow consecutive substitutions to be independent
+		runs = rle(variable)
+		variable_pos = runs.filter_values()
+		return len(variable_pos)
+
+## convert leading and trailing gaps in an MSA to a special indicator
+def _mask_padding_gaps(aln, mask = "*"):
+
+	## iterate on sequences in alignment
+	seqs = []
+	names = []
+	for seq in aln.iterSeqs():
+		s = str(seq)
+		m1 = re.search(r"^\-+", s)
+		m2 = re.search(r"\-+$", s)
+		## mask gaps preceding real sequence (left-padding)
+		if m1:
+			first_base = m.span()[1]
+			s = mask*first_base + s[first_base:]
+		## mask gaps following real sequence (right-padding)
+		if m2:
+			last_base = m.start()
+			s = s[:last_base] + mask*(m.span()[1] - m.span()[0])
+		seqs.append(s)
+		names.append(s.Name)
+
+	## convert masked sequences to new alignment object and return it
+	rez = LoadSeqs(data = zip(names, seqs), moltype = aln.MolType, aligned = True)
+	return rez
+
+## sum values in a dictionary, ignoring keys, possibly applying a filtering function
+def _dict_sum_if(d, criteria = None):
+	return sum( filter(criteria, d.values()) )
+
+## get counts of non-gap bases from count dictionary
+def _freqs_no_gaps(pos_freq, alphabet = "ACTG")
+	out_dict = {}
+	for k,v in pos_freq.iteritems():
+		if k in alphabet:
+			out_dict.update({k: v})
+	return out_dict
 
 class PseudoalignedRow:
 
@@ -367,6 +443,18 @@ def get_reads(bwt, query, revcomp = False):
 	except Exception as e:
 		print e
 		return None
+
+## given sequences, mulitple-align them with MUSCLE
+## NB: this will probably fail if not enough reads and/or not enough overlap between them
+## NB: requires muscle >=v3.8 in $PATH
+def _align_reads(reads):
+
+	seqs = LoadSeqs(data = [ ("read{}".format(i), reads[i]) for i in range(0, len(reads)) ],
+					moltype = DNA, aligned = False)
+	rez = muscle.muscle_seqs(str(seqs))
+	alignment = dict(MinimalFastaParser(rez["StdOut"].readlines()))
+	new_alignment = Alignment(alignment, MolType = DNA)
+	return new_alignment
 
 ## given lists of (resurrected) reads and dollar-indices, 'pseudoalign' them by centering them on the original query
 def _pseudoalign(reads, dollars, ori, k = 0, spacer = "-"):
@@ -599,3 +687,62 @@ def _consistency_score(aln, maf, alphabet = "ACGT", eps = 0.001):
 
 	else:
 		return None
+
+## simple run-length encoding
+class rle:
+
+	## see <https://docs.python.org/3/library/itertools.html#itertools.accumulate>
+	def _accumulate(self, x, func = operator.add):
+		it = iter(x)
+		total = next(it)
+		yield total
+		for element in it:
+			total = func(total, element)
+			yield total
+
+	def __init__(self, x = None):
+		self._original = None
+		self._iterator = None
+		self._pairs = []
+		self.values = []
+		self.lengths = []
+		self._breaks = []
+		self.starts = []
+		self.ends = []
+		self.bounds = []
+		if x is not None:
+			self._original = x
+			self._iterator = itertools.groupby(x)
+			self._pairs = [ (k, len(list(g))) for k,g in self._iterator ]
+			self.values = zip(*self._pairs)[0]
+			self.lengths = zip(*self._pairs)[1]
+			self._breaks = list(self._accumulate(self.lengths))
+			self.starts = [0] + [ i for i in self._breaks[:-1] ]
+			self.ends = list(self._breaks)
+			self.bounds = zip(self.starts, self.ends)
+
+	def __len__(self):
+		return len(self._pairs)
+
+	def __str__(self):
+		return self._pairs.__str__()
+
+	## filter runs based on their value
+	def filter_values(self, fn = lambda x: x):
+
+		bounds = []
+		for i in range(0, len(self)):
+			if fn(self.values[i]):
+				bounds.append( self.bounds[i] )
+
+		return bounds
+
+	## filter runs based on their value
+	def filter_lengths(self, fn = lambda x: x > 0):
+
+		bounds = []
+		for i in range(0, len(self)):
+			if fn(self.lengths[i]):
+				bounds.append( self.bounds[i] )
+
+		return bounds
