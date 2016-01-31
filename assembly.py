@@ -13,8 +13,9 @@ import collections
 import argparse
 import numpy as np
 
-from snoop import util
+from snoop import util, dna
 from MUS import TranscriptBuilder # actually does the assembly
+from MUSCython import MultiStringBWTCython as MultiStringBWT
 
 ASSEMBLE_FORWARD = True
 ASSEMBLE_BACKWARD = False
@@ -102,12 +103,12 @@ def greedy_assemble(*args, **kwargs):
 	edgeDict = {}
 	for x in xrange(0, len(nodes)):
 		edgeDict[x] = []
-	
+
 	## fill in edge dictionary first
 	for i, e in enumerate(edges):
 		fromID = e[0]
 		edgeDict[fromID].append(i)
-	
+
 	## traverse graph and assemble
 	currentNode = 0
 	seq = nodes[0][2]
@@ -117,33 +118,33 @@ def greedy_assemble(*args, **kwargs):
 		chosenEdge = -1
 		chosenWeight = 0
 		possibleEdges = edgeDict[currentNode]
-		
+
 		for eIndex in possibleEdges:
 			toID = edges[eIndex][1]
 			ew = edges[eIndex][2]
-			
+
 			if ew > chosenWeight:
 				chosenEdge = eIndex
 				chosenWeight = ew
 			else:
 				#previous choice had heavier weight
 				pass
-		
+
 		if chosenEdge == -1 or visitedNodes.has_key(edges[chosenEdge][1]):
 			#either there is no edge to choose or we already visited the chosen node at the end of the edge
 			break
 		else:
-			
+
 			#edge chosen to new node
 			e = edges[chosenEdge]
 			fromID = e[0]
 			toID = e[1]
-			
+
 			print 'Chosen node = '+str(toID)
-			
+
 			n = nodes[toID]
 			nodeSeq = n[2]
-			
+
 			if nodeSeq[0:kminus] != tailSeq:
 				print tailSeq
 				print nodeSeq[0:kminus]
@@ -158,7 +159,7 @@ def greedy_assemble(*args, **kwargs):
 					if len(seq) >= maxlen:
 						seq = seq[0:maxlen]
 						break
-	
+
 	return seq
 
 ## function to return command-line parser for parameters common to assembly tasks
@@ -188,3 +189,74 @@ def assembly_args():
 				help = "use memmapped files to initialize BWT, instead of loading into memory [default: False]" )
 
 	return parser
+
+
+def build_bridge(msbwt, seedKmer, targetKmer, tMin = 1, branchLim = 10, maxBranchLen = 250):
+	"""
+	Assemble the short "bridge" between two sequences expected to occur nearby on the template.
+	@param msbwt - the MSBWT to use for searchs
+	@param seedKmer - a k-mer to seed our bridging
+	@param targetKmer - the target we are trying to bridge to
+	@param tMin - the minimum k-count needed to consider the path
+	@param branchLim - the maximum number of branches we will test
+	@param maxBranchLen - the maximum length of a branch before giving up
+	@return (ret, numBranched)
+		ret - a list of bridges discovered; for most cases this is a list of length one
+		numBranched - the number of branches we explored; if numBranched >= branchLim, this function was not 100% exhaustive
+	"""
+
+	#initialize to our input kmer
+	ret = []
+	possBridges = [ dna.unmask(dna.ungap(seedKmer)) ]
+	targetKmer = dna.unmask(dna.ungap(targetKmer))
+	kmerLen = len(seedKmer)
+
+	#set up some easy values
+	validChars = "ACGT"
+	counts = np.zeros(dtype='<u8', shape=(len(validChars), ))
+	numBranched = 0
+
+	#print (seedKmer, targetKmer)
+
+	#while we have things to explore, and we haven't explored too many, and we don't have a ridiculous number of possibilities
+	while len(possBridges) > 0 and numBranched < branchLim:
+		#get the bridge, the kmer, and the reverse kmer
+		currBridge = possBridges.pop()
+		numBranched += 1
+
+		currKmer = currBridge[len(currBridge)-kmerLen:]
+		revKmer = MultiStringBWT.reverseComplement(currKmer)
+
+		#try to extend it on out
+		while len(currBridge) < maxBranchLen:
+			#get the counts for each possible extension
+			for i, c in enumerate(validChars):
+				counts[i] = msbwt.countOccurrencesOfSeq(currKmer+c)+msbwt.countOccurrencesOfSeq(dna.revcomp(c)+revKmer)
+
+			#get the highest one
+			maxPos = np.argmax(counts)
+			maxSym = validChars[maxPos]
+
+			#make sure the highest is high enough for us to consider it
+			if counts[maxPos] >= tMin:
+				if len(possBridges) < branchLim:
+					#go through all the other possible extensions
+					for i, c in enumerate(validChars):
+						if i != maxPos and counts[i] >= tMin:
+							#add the ones we aren't exploring right now if they're high enough
+							possBridges.append(currBridge+c)
+
+				#make sure the highest isn't too high
+				#this extension meets our requirement so shift over to loop back around
+				currBridge += maxSym
+				currKmer = currKmer[1:]+maxSym
+				revKmer = dna.revcomp(maxSym)+revKmer[0:len(revKmer)-1]
+			else:
+				#our BEST doesn't pass the threshold on this path, stop following
+				break
+
+			if currKmer.startswith(targetKmer):
+				ret.append(currBridge)
+
+	#return all our possibilities
+	return (ret, numBranched)

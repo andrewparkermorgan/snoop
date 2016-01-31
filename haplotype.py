@@ -132,68 +132,68 @@ def consensus(seqList, alphabet = "ACGT"):
 
 ## JMH 15 Oct 2014
 ## extract haplotypes present in a pseudoalignment
-def extract_haplotypes(aln):
-
-	nseq = len(aln)
-	if not nseq:
-		return None
-
-	width = len(aln[0])
-
-	finishedHaps = []
-
-	previousConsensus = PseudoalignedRow("A"*width)
-	currentConsensus, currentScorer = consensus(aln)
-	currSeqs = aln
-
-	while len(currSeqs) > 0 and previousConsensus.diffs(currentConsensus):
-
-		nextSeqs = []
-		consensusSeqs = []
-
-		#we will fill in consensus Seqs downstream
-		finishedHaps.append((currentConsensus, consensusSeqs, []))
-
-		#first get all exact matching reads
-		for seq in currSeqs:
-			if not currentConsensus.diffs(PseudoalignedRow(seq)):
-				consensusSeqs.append(seq)
-			else:
-				nextSeqs.append(seq)
-
-		finishedHaps[-1][2].append((0, len(consensusSeqs)))
-
-		#update these things
-		previousConsensus = currentConsensus
-		currSeqs = nextSeqs
-		currentConsensus, currentScorer = consensus(currSeqs)
-
-		#check if the next consensus is identical
-		acceptedScore = 1
-		while len(currSeqs) > 0 and not previousConsensus.diffs(currentConsensus):
-			#print 'triggered', acceptedScore
-			nextNextSeqs = []
-			minScore = 0xFFFFFFFFFFFFFFFF
-			for seq in nextSeqs:
-				calcScore = currentConsensus.score(PseudoalignedRow(seq), currentScorer)
-				if calcScore < minScore and calcScore > acceptedScore:
-					minScore = calcScore
-
-				if calcScore <= acceptedScore:
-					consensusSeqs.append(seq)
-				else:
-					nextNextSeqs.append(seq)
-			finishedHaps[-1][2].append((acceptedScore, len(nextSeqs)-len(nextNextSeqs)))
-
-			nextSeqs = nextNextSeqs
-			currSeqs = nextSeqs
-			currentConsensus, currentScorer = consensus(currSeqs)
-
-			#acceptedScore += 1
-			acceptedScore = minScore
-
-	for seq in currSeqs:
-		consensusSeqs.append(seq)
-
-	return finishedHaps
-	
+# def extract_haplotypes(aln):
+#
+# 	nseq = len(aln)
+# 	if not nseq:
+# 		return None
+#
+# 	width = len(aln[0])
+#
+# 	finishedHaps = []
+#
+# 	previousConsensus = PseudoalignedRow("A"*width)
+# 	currentConsensus, currentScorer = consensus(aln)
+# 	currSeqs = aln
+#
+# 	while len(currSeqs) > 0 and previousConsensus.diffs(currentConsensus):
+#
+# 		nextSeqs = []
+# 		consensusSeqs = []
+#
+# 		#we will fill in consensus Seqs downstream
+# 		finishedHaps.append((currentConsensus, consensusSeqs, []))
+#
+# 		#first get all exact matching reads
+# 		for seq in currSeqs:
+# 			if not currentConsensus.diffs(PseudoalignedRow(seq)):
+# 				consensusSeqs.append(seq)
+# 			else:
+# 				nextSeqs.append(seq)
+#
+# 		finishedHaps[-1][2].append((0, len(consensusSeqs)))
+#
+# 		#update these things
+# 		previousConsensus = currentConsensus
+# 		currSeqs = nextSeqs
+# 		currentConsensus, currentScorer = consensus(currSeqs)
+#
+# 		#check if the next consensus is identical
+# 		acceptedScore = 1
+# 		while len(currSeqs) > 0 and not previousConsensus.diffs(currentConsensus):
+# 			#print 'triggered', acceptedScore
+# 			nextNextSeqs = []
+# 			minScore = 0xFFFFFFFFFFFFFFFF
+# 			for seq in nextSeqs:
+# 				calcScore = currentConsensus.score(PseudoalignedRow(seq), currentScorer)
+# 				if calcScore < minScore and calcScore > acceptedScore:
+# 					minScore = calcScore
+#
+# 				if calcScore <= acceptedScore:
+# 					consensusSeqs.append(seq)
+# 				else:
+# 					nextNextSeqs.append(seq)
+# 			finishedHaps[-1][2].append((acceptedScore, len(nextSeqs)-len(nextNextSeqs)))
+#
+# 			nextSeqs = nextNextSeqs
+# 			currSeqs = nextSeqs
+# 			currentConsensus, currentScorer = consensus(currSeqs)
+#
+# 			#acceptedScore += 1
+# 			acceptedScore = minScore
+#
+# 	for seq in currSeqs:
+# 		consensusSeqs.append(seq)
+#
+# 	return finishedHaps
+#

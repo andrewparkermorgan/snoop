@@ -10,6 +10,8 @@ import sys
 import logging
 import collections
 import itertools
+import operator
+import fnmatch
 import copy
 import re
 import numpy as np
@@ -17,12 +19,15 @@ import scipy.stats as sp
 
 import MUSCython.MultiStringBWTCython as ms
 
-from cogent import LoadSeqs, DNA
-from cogent.app import muscle
-from cogent.core.alignment import SequenceCollection, Alignment
-from cogent.parse.fasta import MinimalFastaParser
+#from cogent import LoadSeqs, DNA
+#from cogent.evolve.pairwise_distance import TN93Pair
+#from cogent.app import muscle_v38 as muscle
+#from cogent.core.alignment import SequenceCollection, Alignment
+#from cogent.parse.fasta import MinimalFastaParser
 
-from snoop import io, dna, haplotype
+#from Bio.Cluster import cluster
+
+from snoop import io, dna, haplotype, rle
 
 ORIENTATION_FWD = 0
 ORIENTATION_REV = 1
@@ -42,6 +47,55 @@ def _init_logger(stream = LOG_STREAM):
 	ch.setFormatter(formatter)
 	logger.addHandler(ch)
 	return logger
+
+## container for doing stuff on multiple msBWTs
+class BwtSet:
+
+	def __init__(self, bwt_paths):
+
+		self._bwts = []
+		try:
+			self._bwts = self._load_bwts(bwt_paths)
+			self.sizes = { b: self._bwts[b].getSymbolCount(0) for b in self._bwts.keys() }
+			self.names = self._bwts.keys()
+		except Exception as e:
+			raise ValueError("Coudln't load one or more msBWTs because: {}".format(str(e)))
+
+	def __len__(self):
+		return len(self._bwts)
+
+	def __getitem__(self, key):
+		return self._bwts[key]
+
+	def __repr__(self):
+		rez = "BwtSet with {} msBWTs:\n".format(len(self._bwts))
+		for b in self._bwts.keys():
+			rez += "\t{}: {} ({:.2f}M reads)\n".format(b, str(self._bwts[b]), self.sizes[b]/1e6)
+		return rez
+
+	def _load_bwts(self, bwt_dirs):
+
+		msbwt = {}
+		for ff in bwt_dirs:
+			if not io.readable_dir(ff):
+				continue
+			name = os.path.basename(ff.rstrip("/"))
+			msbwt.update( { name: ms.loadBWT(ff) } )
+
+		if len(msbwt):
+			return msbwt
+		else:
+			return None
+
+	def count(self, seq, normalize = False):
+		counts = collections.defaultdict(float)
+		for b in self.names:
+			if not normalize:
+				sz = 1
+			else:
+				sz = self.sizes[b]/1e9
+			counts[b] += count_reads(self._bwts[b], seq)/sz
+		return counts
 
 ## abstract container for a single read as stored in a msBWT
 class Read:
@@ -76,6 +130,9 @@ class Read:
 			return len(self.seq)
 		else:
 			return None
+
+	def __repr__(self):
+		return self.__str__()
 
 	def __str__(self):
 
@@ -167,9 +224,16 @@ class ReadSet:
 			self.seq[key] = read.seq
 			self.offset[key] = read.offset
 
+	def _iter_reads(self):
+		for i in range(0, len(self)):
+			this_read = self.seq[i]
+			if self.orientation[i] == ORIENTATION_REV:
+				this_read = dna.revcomp(self.seq[i])
+			yield this_read
+
 	def items(self):
 		for i in range(0, len(self.seq)):
-			yield Read(self.seq[i], self.offset[i], self.orientation[key])
+			yield Read(self.seq[i], self.offset[i], self.orientation[i])
 
 	def append(self, read):
 		self.seq.append(read.seq)
@@ -193,7 +257,7 @@ class ReadSet:
 
 	def align(self, force = True):
 		if self.alignment is None or force:
-			self.alignment = _align_reads(self.seq)
+			self.alignment = _align_reads(list(self._iter_reads()))
 		return self.alignment
 
 	def consistency_score(self, maf = 0.0, eps = 0.00001):
@@ -232,29 +296,30 @@ class ReadSet:
 
 		return pretty
 
-	def extract_haplotypes(self, maf = 1):
+	#def extract_haplotypes(self, maf = 1):
+	#
+	#	if self.alignment is not None:
+	#		haps = haplotype.extract_haplotypes(self.alignment)
+	#		threshold = maf
+	#		if maf < 1.0:
+	#			threshold = float(len(haps))*maf
+	#		hapdict = {}
+	#		nhaps = 0
+	#		for (row, seqs, scores) in haps:
+	#			hapdict.update( {row.seq: scores[0][1]} )
+	#			nhaps += (scores[0][1] > threshold)
+	#
+	#		self.haplotypes = hapdict
+	#		self.nhaplotypes = nhaps
+	#	return (self.nhaplotypes, self.haplotypes)
 
-		if self.alignment is not None:
-			haps = haplotype.extract_haplotypes(self.alignment)
-			threshold = maf
-			if maf < 1.0:
-				threshold = float(len(haps))*maf
-			hapdict = {}
-			nhaps = 0
-			for (row, seqs, scores) in haps:
-				hapdict.update( {row.seq: scores[0][1]} )
-				nhaps += (scores[0][1] > threshold)
-
-			self.haplotypes = hapdict
-			self.nhaplotypes = nhaps
-		return (self.nhaplotypes, self.haplotypes)
-
-
-	## count number of varibale sites in a true MSA of reads
-	def count_variable_sites(self, maf = 1, min_coverage = 5, spacer = None):
+	## find variable sites in a true MSA of reads
+	## return value a tuple: (pretty-printed indicator string, list of variable ranges, number of callable sites)
+	def find_variant_sites(self, maf = 1, min_coverage = 5, spacer = None):
 
 		if self.alignment is None:
 			self.align(force = True)
+			#print self.alignment
 		# since reads don't all start at same site, next part is required to discriminate between true gaps and padding
 		self.alignment = _mask_padding_gaps(self.alignment, spacer)
 
@@ -263,23 +328,92 @@ class ReadSet:
 
 		passing = []
 		variable = []
-		pos_freq = self.alignment.getColumnFreqs()
+		pos_freq = self.alignment.columnFreqs()
 		for i in range(0, len(pos_freq)):
 			col = pos_freq[i]
 			col_filtered = _freqs_no_gaps(col, self.alphabet + "-")
 			total = _dict_sum_if(col_filtered)
 			if total >= min_coverage:
 				passing.append(i)
-			variable.append( len(_dict_sum_if(col_filtered, lambda x: x >= maf)) > 1)
+			variable.append( int(len(filter(lambda x: x >= maf, col_filtered.values())) > 1) )
 
 		## convert to run-length encoding in order to avoid over-counting: consecutive variants are assumed a single event
 		## TODO: impose the consecutive-event rule only for gaps; allow consecutive substitutions to be independent
-		runs = rle(variable)
+		runs = rle.rle(variable)
 		variable_pos = runs.filter_values()
-		return len(variable_pos)
+		return (variable, variable_pos, len(passing))
+
+	## given a list of variable ranges, create hapltoypes and count their abundance
+	def extract_haplotypes(self, varpos, kmer = None, offset = None, maf = 1, allow_missing = True, missing_char = "?"):
+
+		if self.alignment is None:
+			raise ValueError
+
+		#if not offset:
+		#	if not kmer:
+		#		raise ArgumentError("Must specify a k-mer or an offset in order to split alignment into halves.")
+		#	else:
+		#		offset = min([ str(s).find(kmer) for s in self.alignment.iterSeqs() ])
+		#		if offset < 0:
+		#			raise ArgumentError("k-mer not found in alignment.")
+		#		offset = offset + len(kmer)/2
+
+		## split alignment
+		#alns = [ self.alignment[ :offset ], self.alignment[ offset: ] ]
+
+		#for a in alns:
+		haps = []
+		for seq in self.alignment.iterSeqs():
+			s = str(seq)
+			this_hap = "".join([ s[i] for i,j in varpos ])
+			if not (missing_char in this_hap) or allow_missing:
+				#haps[this_hap] += 1
+				haps.append(this_hap)
+
+		unique_haps = _uniquify_haps(haps)
+
+		## tally haplotypes
+		counts = collections.defaultdict(int)
+		for h in haps:
+			matched = []
+			unmatched = 0
+			for u in unique_haps:
+				if _match_with_missing(h, u):
+					matched.append(u)
+			## add to haplotype totals
+			for u in matched:
+				## if ambiguous match, put it in unmmatched pile
+				if len(matched) > 1:
+					unmatched += 1
+				else:
+					counts[u] += 1
+
+			## allocate unmatched reads in proportion to matched reads (EM-style)
+			unambig_total = _dict_sum_if(counts)
+			for u in counts.keys():
+				counts[u] += (float(counts[u])/unambig_total)*unmatched
+
+		return _dict_filter(counts, lambda x: counts[x] >= maf)
+
+
+	## cluster reads by pairwise distance, dump small clusters, and return consensus and count in each cluster
+	## TODO: how to decide number of clusters???
+	#def cluster_reads(self, min_coverage = 5):
+	#
+	#	raise NotImplementedError
+	#
+	#	if self.alignment is None:
+	#		self.align(force = True)
+	#
+	#	dist_calc = TN93Pair(DNA, alignment = self.alignment)
+	#	dist_calc.run()
+	#	dist_mat = dist_calc.getPairwiseDistances()
+	#
+	#	clus = cluster.treecluster(distancematrix = dist_mat)
+
 
 ## convert leading and trailing gaps in an MSA to a special indicator
-def _mask_padding_gaps(aln, mask = "*"):
+def _mask_padding_gaps(aln, mask = "?"):
 
 	## iterate on sequences in alignment
 	seqs = []
@@ -290,30 +424,107 @@ def _mask_padding_gaps(aln, mask = "*"):
 		m2 = re.search(r"\-+$", s)
 		## mask gaps preceding real sequence (left-padding)
 		if m1:
-			first_base = m.span()[1]
+			first_base = m1.span()[1]
 			s = mask*first_base + s[first_base:]
 		## mask gaps following real sequence (right-padding)
 		if m2:
-			last_base = m.start()
-			s = s[:last_base] + mask*(m.span()[1] - m.span()[0])
+			last_base = m2.start()
+			s = s[:last_base] + mask*(m2.span()[1] - m2.span()[0])
 		seqs.append(s)
-		names.append(s.Name)
+		names.append(seq.Name)
 
 	## convert masked sequences to new alignment object and return it
-	rez = LoadSeqs(data = zip(names, seqs), moltype = aln.MolType, aligned = True)
+	mt = seq.MolType
+	rez = LoadSeqs(data = zip(names, seqs), moltype = mt, aligned = True)
 	return rez
 
 ## sum values in a dictionary, ignoring keys, possibly applying a filtering function
 def _dict_sum_if(d, criteria = None):
 	return sum( filter(criteria, d.values()) )
 
+def _dict_filter(d, criteria = None):
+	k = filter(criteria, d.keys())
+	return { i: d[i] for i in k }
+
 ## get counts of non-gap bases from count dictionary
-def _freqs_no_gaps(pos_freq, alphabet = "ACTG")
+def _freqs_no_gaps(pos_freq, alphabet = "ACTG"):
 	out_dict = {}
 	for k,v in pos_freq.iteritems():
 		if k in alphabet:
 			out_dict.update({k: v})
 	return out_dict
+
+## merge strings liberally to get rid of missing values
+def _uniquify_haps(seqs):
+
+	unique_haps = set(seqs)
+	flags = [ "?" in x for x in unique_haps ]
+	len_previous = len(unique_haps) + 1
+
+	## iteratively merge candidate hapltoypes
+	while any(flags) and len_previous > len(unique_haps):
+		len_previous = len(unique_haps)
+		combos = itertools.combinations(unique_haps, 2)
+		unique_haps = set()
+		used = set()
+		for a,b in combos:
+			matched = _match_with_missing(a,b)
+			if matched:
+				ab = _merge_with_missing(a,b)
+				unique_haps.add(ab)
+				for x in [a,b]:
+					if "?" in x:
+						used.add(x)
+			else:
+				unique_haps.update([a,b])
+		unique_haps = unique_haps - used
+		flags = [ "?" in x for x in unique_haps ]
+
+	## go back and check that, for every pair of consecutive variant sites, that pair was actually observed
+	observed_haps = set()
+	for u in unique_haps:
+		observed = False
+		if len(u) == 1:
+			observed_haps.add(u)
+		else:
+			for i in range(0, len(u)-1):
+				observed = observed or (u[ i:i+1 ] in [ x[ i:i+1 ] for x in set(seqs) ])
+			if observed:
+				observed_haps.add(u)
+
+	return observed_haps
+
+def _argmin(x):
+	val, idx = min([ (val, idx) for (idx, val) in enumerate(x) ])
+	return idx
+
+def _match_with_missing(s1, s2, missing_chars = "?*.N"):
+	if len(s1) != len(s2):
+		raise ValueError
+	score = 0
+	for i in range(0, len(s1)):
+		if (s1[i] not in missing_chars) and (s2[i] not in missing_chars):
+			score += int(s1[i] != s2[i])
+	return score == 0
+
+def _merge_with_missing(s1, s2, missing_chars = "?*.N"):
+
+	if len(s1) != len(s2):
+		raise ValueError
+	rez = ""
+	for i in range(0, len(s1)):
+		if s1[i] in missing_chars:
+			if s2[i] in missing_chars:
+				rez += "?"
+			else:
+				rez += s2[i]
+		else:
+			if (s2[i] in missing_chars) or (s2[i] == s1[i]):
+				rez += s1[i]
+			else:
+				raise ValueError
+
+	return rez
 
 class PseudoalignedRow:
 
@@ -454,6 +665,7 @@ def _align_reads(reads):
 	rez = muscle.muscle_seqs(str(seqs))
 	alignment = dict(MinimalFastaParser(rez["StdOut"].readlines()))
 	new_alignment = Alignment(alignment, MolType = DNA)
+	#print new_alignment
 	return new_alignment
 
 ## given lists of (resurrected) reads and dollar-indices, 'pseudoalign' them by centering them on the original query
@@ -687,62 +899,3 @@ def _consistency_score(aln, maf, alphabet = "ACGT", eps = 0.001):
 
 	else:
 		return None
-
-## simple run-length encoding
-class rle:
-
-	## see <https://docs.python.org/3/library/itertools.html#itertools.accumulate>
-	def _accumulate(self, x, func = operator.add):
-		it = iter(x)
-		total = next(it)
-		yield total
-		for element in it:
-			total = func(total, element)
-			yield total
-
-	def __init__(self, x = None):
-		self._original = None
-		self._iterator = None
-		self._pairs = []
-		self.values = []
-		self.lengths = []
-		self._breaks = []
-		self.starts = []
-		self.ends = []
-		self.bounds = []
-		if x is not None:
-			self._original = x
-			self._iterator = itertools.groupby(x)
-			self._pairs = [ (k, len(list(g))) for k,g in self._iterator ]
-			self.values = zip(*self._pairs)[0]
-			self.lengths = zip(*self._pairs)[1]
-			self._breaks = list(self._accumulate(self.lengths))
-			self.starts = [0] + [ i for i in self._breaks[:-1] ]
-			self.ends = list(self._breaks)
-			self.bounds = zip(self.starts, self.ends)
-
-	def __len__(self):
-		return len(self._pairs)
-
-	def __str__(self):
-		return self._pairs.__str__()
-
-	## filter runs based on their value
-	def filter_values(self, fn = lambda x: x):
-
-		bounds = []
-		for i in range(0, len(self)):
-			if fn(self.values[i]):
-				bounds.append( self.bounds[i] )
-
-		return bounds
-
-	## filter runs based on their value
-	def filter_lengths(self, fn = lambda x: x > 0):
-
-		bounds = []
-		for i in range(0, len(self)):
-			if fn(self.lengths[i]):
-				bounds.append( self.bounds[i] )
-
-		return bounds

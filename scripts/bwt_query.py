@@ -23,8 +23,8 @@ parser.add_argument(	"-M", "--msbwt", type = io.readable_dir, nargs = "+",
 			required = True,
 			help= "path to one or more directories containing msBWT components" )
 parser.add_argument(	"-s", "--spacer", type = str,
-			default = ".",
-			help = "spacer character for printed alignments [default:%(default)s]" )
+			default = "?",
+			help = "spacer character for printed alignments, needs to be valid gap character for alignment software [default:%(default)s]" )
 parser.add_argument(	"-f", "--maf", type = int,
 			default = 1,
 			help = "minimum 'minor allele frequency' (an integer number of reads) to accept site as variant [default:%(default)d]" )
@@ -40,17 +40,32 @@ args = parser.parse_args()
 
 msbwt = util.load_bwts(args.msbwt)
 
+def match_line(x):
+	out = ""
+	for i in x:
+		if i:
+			out += "*"
+		else:
+			out += " "
+	return out
+
 for q in args.queries:
-	for i in range(0, len(bwt_dirs)):
-		print "Searching in: " + bwt_dirs[i]
+	for i in range(0, len(args.msbwt)):
+		print "Searching in: " + args.msbwt[i]
 		q = q.upper()
 		reads = util.get_reads(msbwt[i], q, args.revcomp)
 		#reads.pseudoalign(k = len(q), spacer = args.spacer[0])
 		reads.align()
 		if reads.alignment is not None:
-			print reads.alignment
+			rez = reads.find_variant_sites(args.maf, args.coverage, args.spacer)
+			hap_count = reads.extract_haplotypes(rez[1])
+			for r in reads.alignment.iterSeqs():
+				print r
+			print match_line(rez[0])
 			print ""
-			print "Number of variant positions:", reads.count_variant_sites(args.maf, args.coverage, args.spacer)
+			print "Counting variant positions with min coverage = {} and min MAF = {}.".format(args.coverage, args.maf)
+			print "Number of variant positions: {} (of {} callable positions)".format(len(rez[1]), rez[2] - len(q))
+			print hap_count
 			#for j in range(0, len(reads.alignment)):
 			#	print "".join(reads.alignment[j][:])
 			#varcodes = reads.call_variant_sites(args.maf)

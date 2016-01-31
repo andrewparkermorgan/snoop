@@ -21,8 +21,8 @@ import pyfasta
 from MUSCython.MultiStringBWTCython import * # msBWT
 
 parser = argparse.ArgumentParser(description = "Utility for generating and counting occurences of k-mers from a reference sequence in a msBWT.")
-parser.add_argument(	"-r","--regions", type = argparse.FileType("rU"),
-			required = True,
+parser.add_argument(	"-r","--regions", nargs = "?", type = argparse.FileType("rU"),
+			default = sys.stdin,
 			help = "list of regions (in bed format) for which to make k-mers" )
 parser.add_argument(	"-g","--genome", type = io.readable_file,
 			default = "$GENOMES/mm10/mm10.fa",
@@ -32,9 +32,9 @@ parser.add_argument(	"-k","--kmer", type = int,
 			help = "k-mer size in bp (ie. length of probe) [default: %(default)s]" )
 parser.add_argument(	"-s","--step", type = int,
 			help = "step size for making k-mers; if kmer_1 = (1, k), kmer_2 = (1+s, k+s) [default: same as k-mer size]" )
-parser.add_argument(	"-M","--msbwt",
+parser.add_argument(	"-M","--msbwt", nargs = "+",
 			default = "./",
-			help = "globbing expression to find directories containing msBWT components" )
+			help = "one or more directories containing msBWT components" )
 parser.add_argument(	"-n","--normalize", type = io.readable_dir,
 			default = None,
 			help = "msBWT against which to normalize abundances of each queried k-mer" )
@@ -70,9 +70,8 @@ parser.add_argument(	"-B", "--bootstrap", type = int,
 			help = "in summary mode, generate bootstrap CIs for count of zeros using this many replicates [default: %(default)s]" )
 args = parser.parse_args()
 
-
 ## connect to msBWT(s)
-bwt_dirs = glob.glob(args.msbwt)
+bwt_dirs = args.msbwt
 msbwt = util.load_bwts(bwt_dirs)
 
 ## fail if couldn't connect to at least one msBWT
